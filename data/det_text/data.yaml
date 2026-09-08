@@ -1,0 +1,7 @@
+names:
+  0: text_h
+  1: text_v
+nc: 2
+path: C:\projects\train-center\data\det_text
+train: images/train
+val: images/val

@@ -1,0 +1,6 @@
+names:
+  0: fabric
+nc: 1
+path: C:\projects\train-center\data\det_fabric
+train: images/train
+val: images/val

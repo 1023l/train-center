@@ -1,0 +1,70 @@
+# .gitignore for train-center (超算中心 · 标注训练平台)
+
+# === 大文件/二进制产物: 不入库 ===
+# ---- 模型权重: 每个 100MB+ ----
+*.pt
+*.pdparams
+*.pdiparams
+*.pdopt
+*.pdstates
+*.onnx
+*.engine
+*.trt
+
+# ---- YOLO train cache (det_fabric / det_text labels/*.cache) ----
+*.cache
+
+# ---- PaddleOCR 训练中间产物 (checkpoints / 导出) ----
+/PaddleOCR/output/**
+/PaddleOCR/pretrain_models/**
+/PaddleOCR/inference/**
+/PaddleOCR/models/**
+
+# ---- 训练结果 / 可视化 / 曲线 ----
+/runs/**
+!/runs/dataset_cfg/*.yaml   # 只保留数据集配置（小、但重要）
+
+# ---- 上传 / 抽取 / 中间数据 ----
+/data/_*/**
+/data/*/images/**
+/data/*/labels/**
+/data/rec_text/crop_img/**
+!/data/*/data.yaml
+!/data/rec_text/dict.txt
+!/data/rec_text/train.txt
+!/data/rec_text/val.txt
+
+# ---- Python 编译产物 ----
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- 日志 / 临时 ----
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# 第三方 PaddleOCR 源码（本机已有独立 .git，体积大；请自行 clone 到 PaddleOCR/）
+/PaddleOCR/
+
+# 内部工作台材料（若存在）
+.workbuddy/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.env
+.env.*

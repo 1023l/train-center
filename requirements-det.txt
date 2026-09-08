@@ -1,0 +1,29 @@
+# train-center · det 训练 + Web 服务环境清单
+# 来源: conda 环境 yolo-bench (C:\Users\Administrator\miniconda3\envs\yolo-bench)
+# 用途: ① Web 服务(uvicorn server.main:app)  ② det_fabric/det_text 训练(train.py, YOLO26)
+# 移植: conda create -n yolo-bench python=3.12 && pip install -r requirements-det.txt
+#
+# ── Web 服务（train-center 后端，轻量）──
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+pydantic>=2.5
+PyYAML>=6.0
+numpy>=1.24
+opencv-python-headless>=4.8
+Pillow>=10.0
+httpx>=0.27
+python-dotenv>=1.0
+
+# ── det 训练（YOLO26 / ultralytics）──
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+ultralytics==8.4.123
+ultralytics-platform==0.1.8
+ultralytics-thop==2.1.6
+lap==0.5.13
+scipy>=1.13
+matplotlib>=3.8
+tqdm>=4.66
+requests>=2.31
+psutil>=5.9

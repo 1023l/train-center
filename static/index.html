@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Train Center · 超算中心平台</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Vue 3 + Element Plus -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <!-- Fabric.js -->
+  <script src="https://unpkg.com/fabric@5.3.0/dist/fabric.min.js"></script>
+  <style>
+    html, body, #app { height: 100%; margin: 0; }
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f7fa; color: #222; }
+    .layout { height: 100%; }
+    .aside { background: #001529; color: #ccc; }
+    .aside .logo { padding: 18px 16px; font-size: 18px; font-weight: bold; color: #fff; border-bottom: 1px solid #0d243a; letter-spacing: 2px; }
+    .aside .el-menu { border-right: none; background: transparent !important; }
+    .el-menu-item.is-active { background: #102a43 !important; color: #409EFF !important; }
+    .header { background: #fff; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e4e7ed; height: 56px; }
+    .header .title { font-size: 17px; font-weight: bold; }
+    .main { padding: 14px 20px; overflow: auto; }
+    .card { background: #fff; border-radius: 6px; padding: 14px 18px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row.between { justify-content: space-between; }
+    .mb { margin-bottom: 12px; }
+    .mb-lg { margin-bottom: 20px; }
+    .muted { color: #909399; font-size: 13px; }
+    .hint { margin-top: 8px; color: #909399; font-size: 12px; line-height: 1.6; }
+    .opt-row { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+    .opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+    .opt-del { cursor: pointer; color: #f56c6c; flex-shrink: 0; }
+    .opt-del:hover { opacity: .7; }
+    .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #ecf5ff; color: #409EFF; font-size: 12px; }
+    .chip.green { background: #f0f9eb; color: #67c23a; }
+    .chip.orange { background: #fdf6ec; color: #e6a23c; }
+    .chip.blue { background: #e6f0ff; color: #409EFF; }
+    .chip.red { background: #fef0f0; color: #f56c6c; }
+    .chip.red-outline { background: #fff; color: #f56c6c; border: 1px solid #f56c6c; }
+    .grid-img { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap: 10px; max-height: 55vh; overflow: auto; }
+    .label-thumb { width: 100%; aspect-ratio: 1; background: #000; position: relative; border-radius: 4px; overflow: hidden; border: 2px solid transparent; }
+    .label-thumb.annotated { border-color: #67c23a; }
+    .label-thumb img { width: 100%; height: 100%; object-fit: contain; }
+    .label-thumb .dot { position: absolute; bottom: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: #67c23a; }
+    .label-thumb.active { outline: 3px solid #409EFF; outline-offset: -3px; }
+
+    /* ========== 标注页：左栏（工具+翻页/保存）  中栏（图片列表缩略）  右栏（Fabric 画布） ========== */
+    .label-page { display: grid; grid-template-columns: 230px 190px 1fr; gap: 12px; height: calc(100vh - 110px); }
+    .label-pane { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .tools-card, .images-card, .canvas-card, .info-card { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+    .canvas-card { height: 100%; }
+    .tool-btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tool-btn-row .el-button { flex: 1 1 auto; margin: 0 !important; }
+    .tool-section-title { font-size: 12px; color: #888; margin: 2px 0 -4px; font-weight: 500; letter-spacing: 1px; }
+    .right-toolbar { display: flex; gap: 6px; justify-content: flex-end; }
+
+    .canvas-wrap { flex: 1; display: flex; flex-direction: column; background: #1a1a1a; border-radius: 6px; overflow: hidden; min-height: 0; position: relative; }
+    #fabric-canvas { display: block; width: 0; height: 0; } /* Fabric 会创建 .canvas-container 包裹，占位 */
+    /* canvas-container 占 canvas-wrap 中 canvas-footer 之外的剩余空间 */
+    .canvas-wrap > .canvas-container { flex: 1 1 auto !important; width: auto !important; height: auto !important; min-height: 0; position: relative; }
+    /* 像素坐标悬浮读数（替代被清理的 footer） */
+    .pixel-readout { position: absolute; right: 8px; bottom: 8px; z-index: 5; background: rgba(0,0,0,.65); color: #7fff7f; font: 12px/1.6 "Cascadia Mono", Consolas, monospace; padding: 3px 8px; border-radius: 4px; pointer-events: none; }
+    /* Fabric 内部 lower/upper canvas 必须和容器尺寸一致（绝对定位铺满容器） */
+    .canvas-wrap > .canvas-container canvas.lower-canvas,
+    .canvas-wrap > .canvas-container canvas.upper-canvas { position: absolute !important; left: 0 !important; top: 0 !important; }
+    .canvas-info { color: #aaa; font-size: 12px; background: rgba(0,0,0,.55); padding: 3px 8px; border-radius: 4px; }
+    .canvas-footer { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(0,0,0,.65); }
+
+    .img-strip { flex: 1; overflow-y: auto; }
+    .img-strip .label-thumb { aspect-ratio: auto; height: 110px; margin-bottom: 6px; cursor: pointer; }
+
+    .box-list { max-height: 180px; overflow-y: auto; border: 1px solid #f0f0f0; border-radius: 4px; }
+    .box-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+    .box-item:last-child { border-bottom: none; }
+    .box-item:hover { background: #f5f7fa; }
+
+    .log-view { background: #0b1020; color: #d8e2ff; padding: 10px; border-radius: 4px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; height: 50vh; overflow-y: auto; white-space: pre-wrap; }
+
+    .text-input-layer { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,.4); z-index: 9999; display:flex; align-items:center; justify-content:center; }
+    .text-input-dialog { background: #fff; padding: 16px 20px; border-radius: 6px; min-width: 320px; }
+
+    /* 隐藏原生 folder input，但保留可点击触发 */
+    #folder-input { display: none; }
+    .folder-drop { border: 2px dashed #909399; border-radius: 8px; padding: 26px 18px; text-align: center; cursor: pointer; background: #fafbfc; }
+    .folder-drop:hover { border-color: #409EFF; background: #ecf5ff; }
+
+    /* 上传进度条 */
+    .upload-progress { margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <el-container class="layout">
+    <!-- 左侧菜单 -->
+    <el-aside width="200" class="aside">
+      <div class="logo">🧪 Train Center</div>
+      <el-menu :default-active="route" background-color="transparent" text-color="#ccc" active-text-color="#409EFF" @select="route=$event">
+        <el-menu-item index="data"><span>📁 数据管理</span></el-menu-item>
+        <el-menu-item index="label-obj"><span>📍 Obj 标注</span></el-menu-item>
+        <el-menu-item index="label-ocr"><span>✍️ OCR 标注</span></el-menu-item>
+        <el-menu-item index="train"><span>🚀 训练</span></el-menu-item>
+        <el-menu-item index="models"><span>📦 模型管理</span></el-menu-item>
+      </el-menu>
+    </el-aside>
+
+    <el-container>
+      <el-header class="header">
+        <div class="title">{{ pageTitle }}</div>
+        <div>
+          <el-tag size="small" type="info">v1.1 MVP</el-tag>
+          <el-button size="small" link @click="showApi">API Docs</el-button>
+        </div>
+      </el-header>
+
+      <el-main class="main">
+        <!-- ============================= 数据管理 ============================= -->
+        <div v-if="route==='data'">
+          <div class="card mb">
+            <div class="row between mb">
+              <b>📤 上传本地文件夹（子目录按款式 → 自动合并到临时数据集）</b>
+              <span v-if="lastUploadResult" class="chip green">
+                上次上传：{{ lastUploadResult.dataset }} · {{ lastUploadResult.images }} 张
+              </span>
+            </div>
+            <div class="folder-drop" @click="clickFolderInput">
+              <div style="font-size:36px">📂</div>
+              <div style="font-weight:bold;margin:6px 0 4px">点击选择本地文件夹</div>
+              <div style="font-size:12px;color:#666">
+                结构：根文件夹 / 款式子目录（可多层）/ 图片。递归取所有图片存放到
+                <code>data/_uploads/&lt;目录名&gt;_&lt;时间戳&gt;/</code>
+              </div>
+              <div style="margin-top:10px">
+                <el-button type="primary" size="large" @click.stop="clickFolderInput">
+                  选择文件夹
+                </el-button>
+                <el-upload :show-file-list="false" :before-upload="beforeUploadSingle" action="#" style="margin-left:8px">
+                  <el-button size="large">上传 zip / tar</el-button>
+                </el-upload>
+              </div>
+              <input id="folder-input" type="file" webkitdirectory directory multiple @change="onFolderSelected" />
+            </div>
+
+            <div class="upload-progress" v-if="uploadTotal>0">
+              <el-progress :percentage="uploadPercent" :status="uploadStatus"></el-progress>
+              <div style="font-size:12px;color:#666;margin-top:4px">
+                已上传 {{ uploadedFiles }} / {{ uploadTotal }} 个文件，已发现 {{ imageFound }} 张图片
+              </div>
+            </div>
+
+            <task-inline :task-id="lastTask" />
+          </div>
+
+          <div class="card mb">
+            <div class="row between mb">
+              <b>🧩 数据集列表（含系统内置+你上传的）</b>
+              <el-button link size="small" @click="loadDatasets">🔄 刷新</el-button>
+            </div>
+            <el-table :data="datasets" size="small" stripe height="260">
+              <el-table-column label="内置/上传" width="100">
+                <template #default="r">
+                  <span class="chip" :class="r.row.builtin ? 'blue' : 'orange'">
+                    {{ r.row.builtin ? '内置' : '上传' }}
+                  </span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="name" label="路径 / 名称" min-width="280" show-overflow-tooltip></el-table-column>
+              <el-table-column label="图片数" width="100" prop="images"></el-table-column>
+              <el-table-column label="描述" min-width="220" prop="desc"></el-table-column>
+              <el-table-column prop="created" label="创建时间" width="170"></el-table-column>
+              <el-table-column label="操作" width="240" fixed="right">
+                <template #default="s">
+                  <el-button size="small" :type="(s.row.images>0) ? 'primary':''" @click="previewDataset(s.row.name)">预览图片</el-button>
+                  <el-button size="small" @click="jumpToLabel(s.row.name)">去标注 →</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div v-if="previewImages.length" class="card">
+            <div class="row between mb">
+              <b>🖼️ 预览（{{ previewFrom }}-{{ previewFrom+previewImages.length }} / {{ previewTotal }}）
+                <span v-if="currentDataset" style="margin-left:12px" class="chip blue">{{ currentDataset }}</span>
+              </b>
+              <div>
+                <el-button size="small" :disabled="previewFrom===1" @click="previewPage(-1)">上一页</el-button>
+                <el-button size="small" :disabled="previewFrom+previewImages.length >= previewTotal" @click="previewPage(1)">下一页</el-button>
+              </div>
+            </div>
+            <div class="grid-img">
+              <div v-for="it in previewImages" :key="it.rel" class="label-thumb" :class="{annotated: it.annotated}">
+                <img :src="'/files/' + it.rel" :title="it.name" />
+                <div v-if="it.annotated" class="dot"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================= 标注页（Obj & OCR 共用一套 UI） ============================= -->
+        <div v-if="route==='label-obj' || route==='label-ocr'" class="label-page">
+          <!-- ============ 左栏：工具 ============ -->
+          <div class="label-pane">
+            <div class="card tools-card">
+              <div class="tool-section-title">① 选择数据集</div>
+              <el-select v-model="currentDataset" placeholder="选数据集…" filterable style="width:100%" @change="onDatasetChanged">
+                <el-option v-for="d in labelDatasets" :key="d.name"
+                           :label="(d.builtin ? '【内置】' : '【上传】') + d.name + ' ('+d.images+'张)'"
+                           :value="d.name">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span class="chip" :class="d.builtin ? 'blue' : 'orange'" style="margin-right:8px">
+                      {{ d.builtin ? '内置' : '上传' }}
+                    </span>
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis">{{ d.name }}</span>
+                    <span style="margin-left:8px;color:#999">{{ d.images }}张</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <el-button size="small" type="primary" @click="loadImages">🔄 加载全部图片</el-button>
+
+              <div class="tool-section-title">② 工具（快捷键 V/B/R）</div>
+              <div class="tool-btn-row">
+                <el-button :type="tool==='pan' ? 'primary' : ''" size="small" @click="tool='pan'">✋ 拖动</el-button>
+                <el-button :type="tool==='rect' ? 'primary' : ''" size="small" @click="tool='rect'">▢ 矩形</el-button>
+                <el-button :type="tool==='rotate' ? 'primary' : ''" size="small" @click="tool='rotate'">◈ 旋转框</el-button>
+              </div>
+
+              <!-- 类别选择：obj=fabric；ocr=text_h/text_v 按钮组 -->
+              <template v-if="mode==='obj'">
+                <div class="tool-section-title">③ 类别（Obj）</div>
+                <div class="tool-btn-row">
+                  <el-button type="success" disabled>🧵 fabric</el-button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="tool-section-title">③ 方向（OCR）</div>
+                <div class="tool-btn-row">
+                  <el-button :type="activeCls==='text_h' ? 'warning' : ''" @click="activeCls='text_h'">
+                    ⇢ 横排 text_h
+                  </el-button>
+                  <el-button :type="activeCls==='text_v' ? 'primary' : ''" @click="activeCls='text_v'">
+                    ⇣ 竖排 text_v
+                  </el-button>
+                </div>
+                <div class="tool-section-title">④ 文字录入</div>
+                <div class="row">
+                  <el-switch v-model="textEnabled"></el-switch>
+                  <span class="chip orange">{{ textEnabled ? '录文字(默认)' : '只画框' }}</span>
+                </div>
+              </template>
+
+              <div class="tool-section-title">⑤ 翻页（W/S）</div>
+              <div class="row">
+                <el-button size="small" :disabled="!imgPrev()" @click="prevImg">⬅ 上一张</el-button>
+                <span style="font-size:13px;color:#666">{{ curIdx + 1 }} / {{ images.length }}</span>
+                <el-button size="small" :disabled="!imgNext()" @click="nextImg">下一张 ➡</el-button>
+              </div>
+
+              <div style="border-top:1px dashed #eee;padding-top:4px"></div>
+            </div>
+
+            <div class="card info-card" style="flex:0 0 auto">
+              <div class="row between"><b>标注列表（{{ boxes.length }}）</b></div>
+              <div class="box-list">
+                <div v-for="(b, i) in boxes" :key="i" class="box-item" @click="selectBox(i)">
+                  <span><span class="chip" :class="clsChipClass(b.cls)">{{ b.cls }}</span>
+                    {{ b.type === 'rotate' ? '◈' : '▢' }}
+                    <span v-if="b.text">&nbsp;「{{ b.text }}」</span></span>
+                  <el-button size="small" type="danger" link @click.stop="delBox(i)">删</el-button>
+                </div>
+                <div v-if="!boxes.length" style="color:#999;padding:14px;text-align:center">暂未标注</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ 中栏：图片缩略条 ============ -->
+          <div class="label-pane">
+            <div class="card images-card" style="height:100%">
+              <div class="row between mb" style="flex-shrink:0">
+                <b style="font-size:13px">📚 图片（{{ images.length }}）</b>
+                <span class="chip" style="font-weight:normal">绿点=已标注 / 蓝边=当前图</span>
+              </div>
+              <div class="img-strip">
+                <div v-for="(it,i) in images" :key="it.rel"
+                     class="label-thumb" :class="{active: curIdx===i, annotated: it.annotated}"
+                     @click="gotoImage(i)">
+                  <img :src="'/files/'+it.rel" :title="it.name" />
+                  <div v-if="it.annotated" class="dot"></div>
+                </div>
+                <div v-if="!images.length" style="color:#999;text-align:center;padding:26px 6px;font-size:12px">
+                  先在左侧选数据集并加载
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ 右栏：Fabric 画布 + 顶栏操作按钮（撤销/删除放右侧） ============ -->
+          <div class="label-pane">
+            <div class="card canvas-card">
+              <!-- 右栏顶栏：删除+撤销+完成，标注自动保存无需手动导出 -->
+              <div class="row between" style="flex-shrink:0;padding:2px 0">
+                <div></div>
+                <div class="right-toolbar">
+                  <el-button type="danger" size="small" @click="delSel">🗑 删 (D)</el-button>
+                  <el-button size="small" @click="undoBox">↶ 撤 (Ctrl+Z)</el-button>
+                  <el-divider direction="vertical"></el-divider>
+                  <el-button :type="finishedFlag ? 'success' : 'danger'" size="small" @click="finishDataset">{{ finishedFlag ? '✅ 已完成' : '⚠️ 未完成' }}</el-button>
+                </div>
+              </div>
+
+              <div class="canvas-wrap">
+                <canvas id="fabric-canvas"></canvas>
+                <!-- 像素坐标读数：鼠标在图像上的像素位置 + 正在绘制框的宽×高 -->
+                <div class="pixel-readout" v-if="mouseXY || mouseBox">
+                  <span>{{ mouseXY || '—' }}</span><span v-if="mouseBox"> · {{ mouseBox }} px</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文字输入弹层 -->
+        <div class="text-input-layer" v-if="textInputPrompt" @click.self="textCancel">
+          <div class="text-input-dialog">
+            <h4 style="margin:0 0 10px">录入文字内容（<span class="chip" :class="clsChipClass(activeCls)">{{ activeCls }}</span>）</h4>
+            <el-input v-model="textInputValue" placeholder="例如 XL-2890" @keyup.enter="textOk"></el-input>
+            <div class="row" style="margin-top:12px;justify-content:flex-end">
+              <el-button @click="textCancel">取消</el-button>
+              <el-button type="primary" @click="textOk">确定 (Enter)</el-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================= 训练 ============================= -->
+        <div v-if="route==='train'">
+          <div class="card mb">
+            <el-tabs v-model="trainTab">
+              <el-tab-pane label="① Det Fabric 鞋布检测" name="fabric">
+                <div class="row mb">
+                  <span>数据集</span>
+                  <span class="muted">data/det_fabric（固定）</span>
+                  <span>模型</span>
+                  <el-select v-model="fabricP.model" filterable style="width:360px">
+                    <el-option v-for="m in fabricModelChoices" :key="m.path" :label="m.name" :value="m.path">
+                      <div class="opt-row">
+                        <span class="opt-name">{{ m.name }}</span>
+                        <el-icon class="opt-del" @click.stop.prevent="askDeleteModel('det', m.name)"><Delete /></el-icon>
+                      </div>
+                    </el-option>
+                  </el-select>
+                  <span>epochs</span><el-input v-model.number="fabricP.epochs" style="width:90px"></el-input>
+                  <span>batch</span><el-input v-model.number="fabricP.batch" style="width:80px"></el-input>
+                  <span>imgsz</span><el-input v-model.number="fabricP.imgsz" style="width:80px"></el-input>
+                  <span>device</span><el-input v-model="fabricP.device" style="width:60px"></el-input>
+                  <span>version</span><el-input v-model.number="fabricP.version" style="width:60px"></el-input>
+                  <el-button type="primary" @click="startTrainDet('fabric')">🚀 开始训练</el-button>
+                </div>
+              </el-tab-pane>
+              <el-tab-pane label="② Det Text 文字检测" name="text">
+                <div class="row mb">
+                  <span>数据集</span>
+                  <span class="muted">data/det_text（固定）</span>
+                  <span>模型</span>
+                  <el-select v-model="textP.model" filterable style="width:360px">
+                    <el-option v-for="m in textModelChoices" :key="m.path" :label="m.name" :value="m.path">
+                      <div class="opt-row">
+                        <span class="opt-name">{{ m.name }}</span>
+                        <el-icon class="opt-del" @click.stop.prevent="askDeleteModel('det', m.name)"><Delete /></el-icon>
+                      </div>
+                    </el-option>
+                  </el-select>
+                  <span>epochs</span><el-input v-model.number="textP.epochs" style="width:90px"></el-input>
+                  <span>batch</span><el-input v-model.number="textP.batch" style="width:80px"></el-input>
+                  <span>imgsz</span><el-input v-model.number="textP.imgsz" style="width:80px"></el-input>
+                  <span>device</span><el-input v-model="textP.device" style="width:60px"></el-input>
+                  <span>version</span><el-input v-model.number="textP.version" style="width:60px"></el-input>
+                  <el-button type="primary" @click="startTrainDet('text')">🚀 开始训练</el-button>
+                </div>
+              </el-tab-pane>
+              <el-tab-pane label="③ Rec 文字识别" name="rec">
+                <div class="row mb">
+                  <span>数据集</span>
+                  <span class="muted">data/rec_text（固定）</span>
+                  <span>模型</span>
+                  <el-select v-model="recP.model" style="width:340px">
+                    <el-option v-for="m in recChoices" :key="m.value" :label="m.label" :value="m.value">
+                      <div class="opt-row">
+                        <span class="opt-name">{{ m.label }}</span>
+                        <el-icon v-if="m.value!=='mobile' && m.value!=='server'" class="opt-del" @click.stop.prevent="askDeleteModel('ocr', m.value)"><Delete /></el-icon>
+                      </div>
+                    </el-option>
+                  </el-select>
+                  <span>epochs</span><el-input v-model.number="recP.epochs" style="width:90px"></el-input>
+                  <span>batch</span><el-input v-model.number="recP.batch" style="width:80px"></el-input>
+                  <el-button type="primary" @click="startTrainRec">🚀 开始训练</el-button>
+                </div>
+                <div class="hint">PP-OCRv5_mobile / PP-OCRv5_server = 自动下载预训练权重；选「已训练」的 rec 模型则从该模型继续增量训练。</div>
+              </el-tab-pane>
+            </el-tabs>
+          </div>
+          <div class="card mb">
+            <div class="row mb"><b>历史任务</b><el-button size="small" @click="loadTasks">🔄</el-button></div>
+            <el-table :data="tasks" size="small" stripe @row-click="showLog">
+              <el-table-column prop="name" label="名称" width="240"></el-table-column>
+              <el-table-column label="状态" width="110">
+                <template #default="r"><span class="chip" :class="statusClass(r.row.status)">{{ r.row.status }}</span></template>
+              </el-table-column>
+              <el-table-column prop="elapsed_s" label="耗时(s)" width="90"></el-table-column>
+              <el-table-column label="日志行" width="120">
+                <template #default="r">{{ r.row.lines_total }}</template>
+              </el-table-column>
+              <el-table-column prop="task_id" label="ID" width="130"></el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="r"><el-button size="small" link type="primary" @click.stop="showLog(r.row)">看日志</el-button></template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div class="card">
+            <div class="row mb"><b>日志（{{ activeTask ? activeTask.task_id : '' }}）</b>
+              <el-button size="small" :disabled="!activeTask" @click="logPoll=!logPoll">{{ logPoll ? '⏸ 停止刷新' : '▶ 自动刷新' }}</el-button>
+              <span class="chip" v-if="activeTask">{{ activeTask.lines_total }} 行</span>
+            </div>
+            <div class="log-view" ref="logViewRef"><template v-for="(ln, i) in (activeTask? activeTask.lines : [])" :key="i">{{ ln }}
+</template></div>
+          </div>
+        </div>
+
+        <!-- ============================= 模型管理 ============================= -->
+        <div v-if="route==='models'">
+          <div class="card mb">
+            <div class="row between mb">
+              <b>检测模型（models/det）</b>
+              <el-button size="small" @click="loadModels">🔄 刷新</el-button>
+            </div>
+            <el-table :data="modelList.det" size="small" stripe>
+              <el-table-column prop="name" label="名称"></el-table-column>
+              <el-table-column label="测试集指标" width="230">
+                <template #default="r">
+                  <span v-if="r.row.metrics && r.row.metrics.mAP50 !== undefined" class="chip green">
+                    mAP50 {{ r.row.metrics.mAP50 }} · mAP50-95 {{ r.row.metrics['mAP50-95'] }}
+                  </span>
+                  <span v-else class="muted">—（未验证）</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="size_kb" label="大小(kb)" width="110"></el-table-column>
+              <el-table-column prop="updated" label="更新时间" width="170"></el-table-column>
+              <el-table-column label="操作" width="190">
+                <template #default="r">
+                  <el-button size="small" link type="warning" @click="startVal(r.row)">验证</el-button>
+                  <el-button size="small" link type="primary" @click="downloadModel('det', r.row.name)">下载</el-button>
+                  <el-button size="small" link type="danger" @click="deleteModel('det', r.row.name)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div class="card">
+            <div class="row between mb"><b>OCR 模型（models/ocr）</b></div>
+            <el-table :data="modelList.ocr" size="small" stripe>
+              <el-table-column prop="name" label="名称"></el-table-column>
+              <el-table-column label="信息" width="200">
+                <template #default="r">{{ r.row.files ? '推理目录 '+r.row.files+' 个文件' : '权重文件' }}</template>
+              </el-table-column>
+              <el-table-column prop="size_kb" label="大小(kb)" width="120"></el-table-column>
+              <el-table-column prop="updated" label="更新时间" width="180"></el-table-column>
+              <el-table-column label="操作" width="180">
+                <template #default="r">
+                  <el-button size="small" link type="primary" @click="downloadModel('ocr', r.row.name)">下载</el-button>
+                  <el-button size="small" link type="danger" @click="deleteModel('ocr', r.row.name)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+
+      </el-main>
+    </el-container>
+  </el-container>
+</div>
+
+<!-- ====== 全局子组件：简易任务进度卡 ====== -->
+<script type="text/x-template" id="task-inline-tpl">
+  <div v-if="info" class="row" style="padding:8px;background:#f0f9eb;border-radius:4px;margin-top:10px">
+    <span class="chip" :class="statusClass">{{ info.status }}</span>
+    <span>{{ info.name }} · {{ info.elapsed_s }}s · {{ info.lines_total }} 行日志</span>
+    <el-button size="small" link @click="gotoTrain">跳到训练页看日志 →</el-button>
+  </div>
+</script>
+
+<script>
+for (const [k, v] of Object.entries(ElementPlusIconsVue)) {
+  ElementPlus[`ElIcon${v.name || k}`] = v;
+}
+const TaskInline = {
+  name: 'TaskInline',
+  props: ['taskId'],
+  template: '#task-inline-tpl',
+  data: () => ({ info: null, timer: null }),
+  computed: {
+    statusClass() {
+      return this.info ? ({running:'orange',success:'green',failed:'red'}[this.info.status]||'') : '';
+    }
+  },
+  watch: {
+    taskId: { immediate: true, handler(v) {
+      this.refresh();
+      if (this.timer) clearInterval(this.timer);
+      if (v) this.timer = setInterval(this.refresh, 2000);
+    } }
+  },
+  methods: {
+    async refresh() {
+      if (!this.taskId) return;
+      const r = await fetch(`/api/train/tasks/${this.taskId}`).then(r => r.json());
+      this.info = r;
+      if (r.status !== 'running' && this.timer) { clearInterval(this.timer); this.timer = null; }
+    },
+    gotoTrain() { this.$root.$emit('route-goto', 'train'); this.$root.$emit('task-open', this.taskId); }
+  }
+};
+
+const { createApp, reactive, ref, onMounted, nextTick, watch, computed } = Vue;
+
+const App = {
+  components: { TaskInline },
+  setup() {
+    // ---- 路由 ----
+    const route = ref('data');
+    const pageTitle = computed(() => ({
+      'data': '📁 数据管理 — 文件夹上传（子目录按款式）',
+      'label-obj': '📍 Obj 标注 — 鞋型布（fabric）',
+      'label-ocr': '✍️ OCR 标注 — 方向 text_h/text_v + 文字',
+      'train': '🚀 训练',
+      'models': '📦 模型管理'
+    })[route.value]);
+    watch(route, async (v) => {
+      if (v === 'data') await self.loadDatasets();
+      if (v === 'label-obj' || v === 'label-ocr') {
+        await self.loadDatasets();
+        await nextTick();
+        self.initCanvas();
+      }
+      if (v === 'train') { await self.loadTasks(); await self.loadModels(); await self.loadTask(self.activeTask?.task_id); self.startLogLoop(); }
+      if (v === 'models') await self.loadModels();
+    });
+
+    // ---- 通用 ----
+    const self = {};
+    const lastTask = ref('');
+    const datasets = ref([]);
+    const previewImages = ref([]);
+    const previewFrom = ref(1);
+    const previewTotal = ref(0);
+    const currentDataset = ref('');
+    // 当前数据集是否完成过标注：完成按钮据此显示 红(未完成) / 绿(已完成)
+    const finishedFlag = computed(() => {
+      const d = datasets.value.find(x => x.name === currentDataset.value);
+      return !!(d && d.finished);
+    });
+    const lastUploadResult = ref(null);
+    const uploadTotal = ref(0), uploadedFiles = ref(0), imageFound = ref(0);
+    const uploadPercent = ref(0), uploadStatus = ref('');
+
+    // ---- 标注 ----
+    const images = ref([]);
+    const curIdx = ref(0);
+    const boxes = ref([]);
+    const tool = ref('pan');
+    const textEnabled = ref(true);
+    const activeCls = ref('fabric');
+    const classList = ref(['fabric']);
+    const ratio = ref(0.8);
+    const seed = ref(42);
+    const mouseXY = ref('0,0');
+    const mouseBox = ref('');
+    const imgInfo = ref(null);
+    const textInputPrompt = ref(false);
+    const textInputValue = ref('');
+    const undoStack = [];
+
+    // ---- 训练（严格三阶段：det_fabric → det_text → rec_text）----
+    const trainTab = ref('fabric');
+    const fabricP = reactive({ dataset: 'det_fabric', model: '', epochs: 50, batch: 8, imgsz: 640, device: '0', version: 1 });
+    const textP = reactive({ dataset: 'det_text', model: '', epochs: 50, batch: 8, imgsz: 640, device: '0', version: 1 });
+    const recP = reactive({ model: 'mobile', epochs: 50, batch: 8 });
+    const tasks = ref([]);
+    const activeTask = ref(null);
+    const logPoll = ref(true);
+    const logTimer = ref(null);
+    const modelList = reactive({ det: [], ocr: [] });
+    // det 模型全集（fabric/text/yolo 基础权重），按任务过滤出各自下拉
+    const detModelChoices = ref([]);
+    const fabricModelChoices = computed(() => detModelChoices.value.filter(m => m.name.startsWith('fabric') || m.name === 'yolo26n.pt'));
+    const textModelChoices = computed(() => detModelChoices.value.filter(m => m.name.startsWith('text') || m.name === 'yolo26n.pt'));
+    // rec 模型：预训练 mobile/server + 已训练 rec 模型（含 best.pdparams）
+    const recChoices = ref([{label:'PP-OCRv5_mobile（预训练下载）', value:'mobile'}, {label:'PP-OCRv5_server（预训练下载）', value:'server'}]);
+
+    // ---- Fabric.js ----
+    let canvas = null;
+    let fabricImg = null;
+    let drawStart = null;
+    let drawRect = null;
+    let rotatePoints = [];
+    let lineObjs = [];
+
+    // =================== 通用请求 ===================
+    async function getJSON(u, q={}) {
+      const params = new URLSearchParams();
+      for (const [k,v] of Object.entries(q)) if (v!==undefined && v!==null && v!=='') params.set(k,v);
+      const qs = params.toString();
+      const r = await fetch(u + (qs?`?${qs}`:''));
+      if (!r.ok) {
+        let t = await r.text();
+        try { t = JSON.parse(t); } catch(e){}
+        ElementPlus.ElMessage.error((t && (t.detail || t.msg)) || ('HTTP '+r.status));
+        throw new Error(r.status);
+      }
+      return await r.json();
+    }
+    async function postJSON(u, body) {
+      const r = await fetch(u, { method:'POST', headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined });
+      if (!r.ok) {
+        let t = await r.text();
+        try { t = JSON.parse(t); } catch(e){}
+        ElementPlus.ElMessage.error((t && (t.detail || t.msg)) || ('HTTP '+r.status));
+        throw new Error(r.status);
+      }
+      return await r.json();
+    }
+    async function postFormData(u, form) {
+      const r = await fetch(u, { method:'POST', body: form });
+      if (!r.ok) {
+        let t = await r.text();
+        try { t = JSON.parse(t); } catch(e){}
+        ElementPlus.ElMessage.error((t && (t.detail || t.msg)) || ('HTTP '+r.status));
+        throw new Error(r.status);
+      }
+      return await r.json();
+    }
+
+    // =================== 数据管理 ===================
+    function clickFolderInput() { document.getElementById('folder-input').click(); }
+
+    async function onFolderSelected(e) {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) { ElementPlus.ElMessage.warning('空文件夹或未选择'); return; }
+
+      // 提取 webkitRelativePath，前端过滤非图片
+      uploadTotal.value = files.length;
+      uploadedFiles.value = 0;
+      imageFound.value = 0;
+      uploadStatus.value = '';
+      uploadPercent.value = 0;
+
+      const IMG_EXT = new Set(['jpg','jpeg','png','bmp','tiff','tif','webp']);
+      const relpaths = [];
+      const realFiles = [];
+      let rootFolder = '';
+      for (const f of files) {
+        const rel = f.webkitRelativePath || f.name;
+        const parts = rel.split('/');
+        if (!rootFolder && parts.length>1) rootFolder = parts[0];
+        const ext = (f.name.split('.').pop()||'').toLowerCase();
+        if (IMG_EXT.has(ext)) imageFound.value++;
+        relpaths.push(rel);
+        realFiles.push(f);
+      }
+      if (!realFiles.length) { ElementPlus.ElMessage.warning('没有可上传的文件'); return; }
+
+      try {
+        // 组装 multipart：每个文件 + 一份 meta JSON（作为 __meta__.json）
+        const fd = new FormData();
+        const meta = { folderName: rootFolder || 'upload', relpaths };
+        fd.append('files', new Blob([JSON.stringify(meta)], { type:'application/json' }), '__meta__.json');
+        realFiles.forEach((f, i) => fd.append('files', f, relpaths[i]));
+
+        uploadStatus.value = '';
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/data/upload_folder');
+        xhr.upload.onprogress = (ev) => {
+          if (ev.total) uploadPercent.value = Math.round(ev.loaded / ev.total * 100);
+        };
+        xhr.onload = () => {
+          try {
+            const r = JSON.parse(xhr.responseText);
+            if (xhr.status >= 400) { ElementPlus.ElMessage.error((r && (r.detail || r.msg)) || '上传失败'); uploadStatus.value = 'exception'; return; }
+            uploadPercent.value = 100;
+            uploadStatus.value = 'success';
+            lastUploadResult.value = r;
+            currentDataset.value = r.dataset;
+            ElementPlus.ElMessage.success(`📥 ${r.msg}`);
+            // 自动跳到预览
+            previewDataset(r.dataset, 1);
+            loadDatasets();
+          } catch (e) { ElementPlus.ElMessage.error('上传返回解析失败'); uploadStatus.value = 'exception'; }
+        };
+        xhr.onerror = () => { ElementPlus.ElMessage.error('上传网络错误'); uploadStatus.value = 'exception'; };
+        // 计数进度（按 file 粒度）
+        uploadedFiles.value = files.length;
+        xhr.send(fd);
+      } catch (e) { uploadStatus.value = 'exception'; }
+
+      // 清空 input 以便下次选相同目录能触发 change
+      e.target.value = '';
+    }
+
+    async function beforeUploadSingle(file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await postFormData('/api/data/upload', fd);
+        lastUploadResult.value = r;
+        currentDataset.value = r.dataset;
+        ElementPlus.ElMessage.success(`📦 ${r.msg || ('解压完成：' + r.images + ' 张')}`);
+        await loadDatasets();
+        if (r.images) previewDataset(r.dataset, 1);
+      } catch(e){}
+      return false;
+    }
+
+    async function loadDatasets() {
+      try { datasets.value = (await getJSON('/api/data/')).datasets || []; } catch(e){}
+    }
+    async function previewDataset(name, page=1) {
+      try {
+        const r = await getJSON('/api/data/images', {dataset: name, page, size: 40});
+        previewImages.value = r.items;
+        previewTotal.value = r.total;
+        previewFrom.value = (page-1)*40 + 1;
+        currentDataset.value = name;
+      } catch(e){}
+    }
+    function previewPage(step) {
+      const size = 40;
+      const page = Math.floor((previewFrom.value-1)/size) + 1 + step;
+      previewDataset(currentDataset.value, page);
+    }
+    function jumpToLabel(name) {
+      currentDataset.value = name;
+      // 按数据集 kind 判断进哪个标注页：ocr=裁剪图走 OCR 标注，否则 obj
+      const d = datasets.value.find(x => x.name === name);
+      route.value = (d && d.kind === 'ocr') ? 'label-ocr' : 'label-obj';
+      nextTick(() => { if (currentDataset.value) loadImages(); });
+    }
+
+    function showApi() { window.open('/docs'); }
+
+    // =================== 标注：通用 ===================
+    const mode = computed(() => route.value === 'label-obj' ? 'obj' : 'ocr');
+    // 标注页数据集下拉只显示当前模式的数据集：obj=原始大图(fabric 上传/det_fabric)，ocr=裁剪图(ocrtext/det_text)
+    const labelDatasets = computed(() => datasets.value.filter(d => (d.kind || 'obj') === mode.value));
+
+    async function loadClasses() {
+      const r = await getJSON(`/api/label/classes/${mode.value}`);
+      classList.value = r.classes;
+      if (mode.value === 'ocr') {
+        activeCls.value = 'text_h';  // 用户要求：OCR 默认 H
+      } else {
+        activeCls.value = r.classes[0];
+      }
+    }
+
+    function onDatasetChanged() { (async ()=>{ await autoSave(); loadImages(); })(); }
+
+    async function loadImages() {
+      if (!currentDataset.value) { ElementPlus.ElMessage.warning('请先选择数据集'); return; }
+      try {
+        await autoSave();
+        const r = await getJSON('/api/data/images', {dataset: currentDataset.value, page:1, size: 20000});
+        images.value = r.items;
+        previewTotal.value = r.total;
+        ElementPlus.ElMessage.success(`加载 ${r.total} 张图片`);
+        curIdx.value = 0;
+        loadCurrentImage();
+      } catch(e){}
+    }
+    function gotoImage(i) {
+      if (i === curIdx.value) return;
+      autoSave();
+      curIdx.value = i;
+      loadCurrentImage();
+    }
+    function clsColor(cls) {
+      return (mode.value === 'obj' ? {fabric:'#00dc00'} : {text_h:'#ffa000', text_v:'#00a0ff'})[cls] || '#ff0';
+    }
+    function clsChipClass(cls) {
+      return cls === 'fabric' ? 'green' : (cls === 'text_h' ? 'orange' : 'blue');
+    }
+
+    async function loadCurrentImage() {
+      if (!images.value.length) {
+        boxes.value = []; imgInfo.value = null; fabricImg = null;
+        if (canvas) canvas.remove.apply(canvas, canvas.getObjects());
+        scheduleRenderCanvas();
+        return;
+      }
+      const it = images.value[curIdx.value];
+      const url = '/files/' + it.rel;
+      let r = null;
+      try {
+        r = await getJSON('/api/label/load', {image_path: it.path, mode: mode.value});
+      } catch (e) {
+        ElementPlus.ElMessage.error('读取标注失败：' + (e && e.message || e));
+        return;
+      }
+      boxes.value = r.boxes.map(b => ({...b}));
+      imgInfo.value = { w: r.image_w, h: r.image_h };
+      it.annotated = boxes.value.length > 0;   // 切换/翻页后按磁盘 txt 重新校准绿点
+      await nextTick();
+      scheduleRenderCanvas({ needImgUrl: url, needBoxes: boxes.value });
+    }
+
+    // ---------------- 单入口画布调度：解决 初始化 / resize / 切图 的竞态 ----------------
+    // 只有在 DOM 节点存在且容器尺寸>0 时才真正执行 init / setDimensions / 图片加载 / 重绘。
+    // 所有外部触发都统一走 scheduleRenderCanvas()，带意图，按顺序串行。
+    let _canvasTimer = null;
+    let _canvasPending = { needInit: true, needResize: false, needImgUrl: null, needBoxes: null };
+    let _resizeObs = null;
+    function scheduleRenderCanvas(patch) {
+      if (patch) Object.assign(_canvasPending, patch);
+      if (_canvasTimer) return;
+      _canvasTimer = setTimeout(async () => {
+        _canvasTimer = null;
+        await nextTick();
+        for (let retry = 0; retry < 8; retry++) {
+          const wrap = document.querySelector('.canvas-wrap');
+          const el = document.getElementById('fabric-canvas');
+          const ok = wrap && el && wrap.clientWidth > 10 && wrap.clientHeight > 20;
+          if (!ok) {
+            await new Promise(r => setTimeout(r, 60));
+            continue;
+          }
+          // Step 1: ensure canvas instance
+          if (_canvasPending.needInit || !canvas) {
+            if (canvas) try { canvas.dispose && canvas.dispose(); } catch(e) {}
+            try {
+              canvas = new fabric.Canvas('fabric-canvas', {
+                selection: false,
+                preserveObjectStacking: true,
+                width: wrap.clientWidth,
+                height: wrap.clientHeight,
+                fireRightClick: true,
+                stopContextMenu: true,
+              });
+              canvas.on('mouse:down', onCanvasMouseDown);
+              canvas.on('mouse:move', onCanvasMouseMove);
+              canvas.on('mouse:up', onCanvasMouseUp);
+              // 滚轮缩放 + pan
+              canvas.on('mouse:wheel', onCanvasMouseWheel);
+              // 拖动 pan 模式：基于 absolutePan
+              canvas.on('mouse:down:before', function (opt) {
+                if (tool.value !== 'pan') return;
+                canvas.isDragging = true;
+                canvas.selection = false;
+                canvas.lastPosX = opt.e.clientX;
+                canvas.lastPosY = opt.e.clientY;
+              });
+              canvas.on('mouse:move:before', function (opt) {
+                if (tool.value !== 'pan' || !canvas.isDragging) return;
+                const dx = opt.e.clientX - canvas.lastPosX;
+                const dy = opt.e.clientY - canvas.lastPosY;
+                canvas.relativePan(new fabric.Point(dx, dy));
+                canvas.lastPosX = opt.e.clientX;
+                canvas.lastPosY = opt.e.clientY;
+              });
+              canvas.on('mouse:up:before', function () {
+                canvas.isDragging = false;
+                canvas.selection = false;
+              });
+              // 避免重复监听（单例 flag）
+              if (!window.__labelKeyBound) {
+                window.addEventListener('keydown', onKey);
+                window.addEventListener('resize', () => scheduleRenderCanvas({ needResize: true }));
+                window.__labelKeyBound = true;
+              }
+              if (window.ResizeObserver) {
+                if (_resizeObs) _resizeObs.disconnect();
+                _resizeObs = new ResizeObserver(() => scheduleRenderCanvas({ needResize: true }));
+                _resizeObs.observe(wrap);
+              }
+              _canvasPending.needInit = false;
+            } catch (e) {
+              console.error('init fabric failed', e);
+              ElementPlus.ElMessage.error('画布初始化失败：' + (e.message || e));
+              return;
+            }
+          }
+          // Step 2: resize canvas to wrap size (always re-apply — cheap, robust)
+          try {
+            canvas.setDimensions({ width: wrap.clientWidth, height: wrap.clientHeight });
+          } catch(e) { console.error(e); }
+          _canvasPending.needResize = false;
+
+          // Step 3: draw image if requested
+          if (_canvasPending.needImgUrl) {
+            const u = _canvasPending.needImgUrl + '?t=' + Date.now();
+            _canvasPending.needImgUrl = null;
+            try {
+              canvas.remove.apply(canvas, canvas.getObjects());
+            } catch(e) {}
+            fabricImg = null;
+            await new Promise(resolve => {
+              fabric.Image.fromURL(u, (img, err) => {
+                if (err || !img) {
+                  console.error('image load failed', u, err);
+                  ElementPlus.ElMessage.error('图片加载失败（检查网络或路径）');
+                  resolve(); return;
+                }
+                img.set({ selectable: false, evented: false });
+                fabricImg = img;
+                try { canvas.add(img); } catch(e) {}
+                try { fitImage(); } catch(e) {}
+                resolve();
+              }, { crossOrigin: 'anonymous' });
+            });
+          } else {
+            // Always re-fit existing image after resize
+            if (fabricImg) try { fitImage(); } catch(e) {}
+          }
+          // Step 4: boxes
+          if (_canvasPending.needBoxes) {
+            const bx = _canvasPending.needBoxes;
+            _canvasPending.needBoxes = null;
+            try { renderBoxes(bx); } catch(e) { console.error(e); }
+          }
+          // Render once
+          try { canvas.requestRenderAll(); } catch(e) {}
+          return; // success
+        }
+        console.warn('canvas gate never opened after retries');
+      }, 20);
+    }
+
+    // OLD stub removed — keeping the names for backward-compat
+    function initCanvas() { scheduleRenderCanvas({ needInit: true }); }
+    function resizeCanvas() { scheduleRenderCanvas({ needResize: true }); }
+    function fitImage() {
+      if (!fabricImg || !canvas) return;
+      // 重置视口变换：消除上一张图 / 其它页残留的 zoom 与 pan
+      try { canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); } catch(e) {}
+      const cw = canvas.width, ch = canvas.height;
+      const iw = fabricImg.width, ih = fabricImg.height;
+      const scale = Math.min(cw / iw, ch / ih, 1);
+      fabricImg.set({
+        left: (cw - iw * scale) / 2,
+        top: (ch - ih * scale) / 2,
+        scaleX: scale, scaleY: scale,
+      });
+      canvas.requestRenderAll();
+    }
+    function toImg(pt) {
+      if (!fabricImg) return null;
+      const L = fabricImg.left, T = fabricImg.top, s = fabricImg.scaleX;
+      const x = (pt.x - L) / s, y = (pt.y - T) / s;
+      return { x, y };
+    }
+    function toScr(x, y) {
+      if (!fabricImg) return {x:0,y:0};
+      const L = fabricImg.left, T = fabricImg.top, s = fabricImg.scaleX;
+      return { x: L + x*s, y: T + y*s };
+    }
+    // Fabric 5.3 的 opt.pointer 在缩放/平移后仍是"屏幕/CSS 坐标"（未还原视口变换），
+    // 这里统一换算成画布逻辑坐标（与对象坐标系一致），保证缩放后点鼠标位置正确。
+    function evtPtr(e) {
+      const rect = canvas.upperCanvasEl.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / (rect.width || 1));
+      const y = (e.clientY - rect.top) * (canvas.height / (rect.height || 1));
+      return fabric.util.transformPoint(new fabric.Point(x, y), fabric.util.invertTransform(canvas.viewportTransform));
+    }
+    function renderBoxes(list) {
+      // 兼容无参调用：drawBoxes() 不带参数时回退到当前 boxes
+      if (!Array.isArray(list)) list = boxes.value || [];
+      for (const o of [...canvas.getObjects()]) if (o !== fabricImg) canvas.remove(o);
+      list.forEach((b) => drawBox(b));
+    }
+    // 别名：防止旧代码调用 drawBoxes
+    const drawBoxes = renderBoxes;
+    function drawBox(b) {
+      const color = clsColor(b.cls);
+      const idx = boxes.value.indexOf(b);
+      if (b.type === 'rect') {
+        const tl = toScr(b.x1, b.y1);
+        const br = toScr(b.x2, b.y2);
+        const r = new fabric.Rect({
+          left: tl.x, top: tl.y,
+          width: Math.max(1, br.x - tl.x), height: Math.max(1, br.y - tl.y),
+          stroke: color, strokeWidth: 1, strokeUniform: true, fill: color + '22', selectable: true, hasControls: false,
+        });
+        r.set({ strokeWidth: 1 });
+        r._boxIdx = idx;
+        canvas.add(r);
+      } else if (b.type === 'rotate' && b.points && b.points.length) {
+        // Fabric 5.3 的 Polygon 只接受 {x,y} 对象点（已移除 [[x,y]] 数组格式支持，否则包围盒 0×0 画不出来）
+        const ptArr = b.points.map(p => { const t = toScr(p[0], p[1]); return { x: t.x, y: t.y }; });
+        const poly = new fabric.Polygon(ptArr, {
+          stroke: color, strokeWidth: 1, strokeUniform: true, fill: color + '22', selectable: true, hasControls: false,
+        });
+        poly._boxIdx = idx;
+        canvas.add(poly);
+      }
+    }
+    function onCanvasMouseDown(opt) {
+      // pan 工具交给 mouse:down:before / :move:before 处理，不拦截
+      if (tool.value === 'pan') return;
+      const p = evtPtr(opt.e);
+      if (tool.value === 'rect') {
+        drawStart = toImg(p);
+        if (!drawStart) return;
+        drawRect = new fabric.Rect({
+          left: p.x, top: p.y, width: 1, height: 1,
+          stroke: '#ff00ff', strokeWidth: 2, fill: 'rgba(255,0,255,.12)',
+          selectable: false, evented: false,
+        });
+        canvas.add(drawRect);
+      } else if (tool.value === 'rotate') {
+        const pt = toImg(p);
+        if (!pt) return;
+        rotatePoints.push(pt);
+        if (rotatePoints.length > 1) {
+          const a = toScr(rotatePoints[rotatePoints.length-2].x, rotatePoints[rotatePoints.length-2].y);
+          const b = toScr(rotatePoints[rotatePoints.length-1].x, rotatePoints[rotatePoints.length-1].y);
+          const ln = new fabric.Line([a.x, a.y, b.x, b.y], {
+            stroke: '#ff00ff', strokeWidth: 2, strokeUniform: true, selectable: false, evented: false,
+          });
+          lineObjs.push(ln); canvas.add(ln);
+        }
+        if (rotatePoints.length === 4) finishRotate();
+      }
+    }
+    function onCanvasMouseMove(opt) {
+      const p = evtPtr(opt.e);
+      const i = toImg(p);
+      mouseXY.value = i ? `${Math.round(i.x)},${Math.round(i.y)}` : '';
+      mouseBox.value = '';
+      if (tool.value === 'rect' && drawStart && drawRect) {
+        const start = toScr(drawStart.x, drawStart.y);
+        const L = Math.min(start.x, p.x), T = Math.min(start.y, p.y);
+        const W = Math.abs(p.x - start.x), H = Math.abs(p.y - start.y);
+        drawRect.set({ left: L, top: T, width: W, height: H });
+        mouseBox.value = fabricImg ? `${Math.round(W / fabricImg.scaleX)}×${Math.round(H / fabricImg.scaleY)}` : '';
+        canvas.requestRenderAll();
+      } else if (tool.value === 'rotate' && rotatePoints.length > 0) {
+        // 跟随线：最后一点 → 当前鼠标位置 的临时线，移动过程中可见
+        const last = rotatePoints[rotatePoints.length - 1];
+        const scrLast = toScr(last.x, last.y);
+        // 维护临时跟随线对象 _previewLine（每次 move 更新，rotatePoints 变点时会清掉）
+        if (lineObjs._preview) try { canvas.remove(lineObjs._preview); } catch(e) {}
+        if (!i) { lineObjs._preview = null; }
+        else {
+          const scrCur = toScr(i.x, i.y);
+          const ln = new fabric.Line([scrLast.x, scrLast.y, scrCur.x, scrCur.y], {
+            stroke: '#00d0ff', strokeWidth: 1.5, strokeUniform: true, strokeDashArray: [5, 4],
+            selectable: false, evented: false,
+          });
+          lineObjs._preview = ln;
+          canvas.add(ln);
+          canvas.requestRenderAll();
+        }
+      }
+    }
+    function onCanvasMouseUp(opt) {
+      if (tool.value === 'pan') return;
+      if (tool.value === 'rect' && drawRect) {
+        const L = drawRect.left, T = drawRect.top, W = drawRect.width, H = drawRect.height;
+        canvas.remove(drawRect); drawRect = null;
+        if (W < 3 || H < 3) return;
+        const start = drawStart;
+        const end = toImg({x: L + W, y: T + H});
+        const x1 = start.x, y1 = start.y, x2 = end ? end.x : start.x, y2 = end ? end.y : start.y;
+        undoSnapshot();
+        boxes.value.push({
+          type:'rect', cls: activeCls.value,
+          x1: Math.round(Math.min(x1,x2)), y1: Math.round(Math.min(y1,y2)),
+          x2: Math.round(Math.max(x1,x2)), y2: Math.round(Math.max(y1,y2)),
+          text: ''
+        });
+        maybePromptText(boxes.value.length-1);
+        drawBoxes();
+        // 标注完成立即自动保存，不需要用户点按钮
+        autoSave();
+      }
+    }
+    function finishRotate() {
+      lineObjs.forEach(l => canvas.remove(l)); lineObjs = [];
+      if (lineObjs._preview) { try { canvas.remove(lineObjs._preview); } catch(e) {} lineObjs._preview = null; }
+      const pts = rotatePoints.slice();
+      rotatePoints = [];
+      if (pts.length < 3) return;
+      undoSnapshot();
+      boxes.value.push({ type:'rotate', cls: activeCls.value, points: pts.map(p=>[Math.round(p.x), Math.round(p.y)]), text:'' });
+      maybePromptText(boxes.value.length-1);
+      drawBoxes();
+      autoSave();
+    }
+    function onCanvasMouseWheel(opt) {
+      // 以鼠标位置为中心的缩放；delta 正值 = 向下 = 缩小
+      try {
+        const e = opt.e;
+        e.preventDefault && e.preventDefault();
+        const delta = e.deltaY;
+        let zoom = canvas.getZoom();
+        zoom = zoom * (1 + (delta > 0 ? -0.08 : 0.08));
+        zoom = Math.max(0.2, Math.min(zoom, 20));
+        const point = new fabric.Point(e.offsetX, e.offsetY);
+        canvas.zoomToPoint(point, zoom);
+      } catch (err) { console.error(err); }
+    }
+    function maybePromptText(idx) {
+      if (mode.value === 'ocr' && textEnabled.value) {
+        textInputPrompt.value = true;
+        textInputValue.value = '';
+        textInputPrompt._idx = idx;
+      }
+    }
+    function textOk() {
+      if (textInputPrompt._idx != null) {
+        boxes.value[textInputPrompt._idx].text = textInputValue.value;
+        drawBoxes();
+        autoSave();
+      }
+      textInputPrompt.value = false;
+    }
+    function textCancel() { textInputPrompt.value = false; }
+
+    function undoSnapshot() {
+      undoStack.push(JSON.parse(JSON.stringify(boxes.value)));
+      if (undoStack.length > 50) undoStack.shift();
+    }
+    function undoBox() {
+      if (rotatePoints.length > 0) {
+        rotatePoints.pop();
+        const last = lineObjs.pop(); if (last) canvas.remove(last);
+        return;
+      }
+      if (undoStack.length) {
+        boxes.value = undoStack.pop();
+        drawBoxes();
+        autoSave();
+      }
+    }
+    function delSel() {
+      const sel = canvas.getActiveObject();
+      if (sel && sel._boxIdx != null) {
+        undoSnapshot();
+        boxes.value.splice(sel._boxIdx, 1);
+        drawBoxes();
+        autoSave();
+      }
+    }
+    function delBox(i) { undoSnapshot(); boxes.value.splice(i,1); drawBoxes(); autoSave(); }
+    function selectBox(i) {
+      const objs = canvas.getObjects().filter(o => o._boxIdx === i);
+      if (objs.length) canvas.setActiveObject(objs[0]);
+    }
+    function onKey(e) {
+      if (route.value !== 'label-obj' && route.value !== 'label-ocr') return;
+      const tgt = e.target;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
+      if (textInputPrompt.value) return;
+      switch(e.key.toLowerCase()) {
+        case 'v': tool.value = 'pan'; break;
+        case 'b': tool.value = 'rect'; break;
+        case 'r': tool.value = 'rotate'; break;
+        case 'd': case 'Delete': delSel(); break;
+        case 'w': prevImg(); break;
+        case 's': nextImg(); break;
+        case '1': if (classList.value[0]) activeCls.value = classList.value[0]; break;
+        case '2': if (classList.value[1]) activeCls.value = classList.value[1]; break;
+        case 't': if (mode.value === 'ocr') textEnabled.value = !textEnabled.value; break;
+        case 'z': if (e.ctrlKey || e.metaKey) { e.preventDefault(); undoBox(); } break;
+      }
+    }
+
+    function imgPrev() { return curIdx.value > 0; }
+    function imgNext() { return curIdx.value < images.value.length - 1; }
+    async function prevImg() {
+      if (!imgPrev()) return;
+      await autoSave();
+      curIdx.value--;
+      loadCurrentImage();
+    }
+    async function nextImg() {
+      if (!imgNext()) return;
+      await autoSave();
+      curIdx.value++;
+      loadCurrentImage();
+    }
+    async function autoSave() {
+      if (!images.value.length) return;
+      const it = images.value[curIdx.value];
+      try {
+        await postJSON('/api/label/save?mode='+mode.value, { image_path: it.path, boxes: boxes.value });
+        setAnnotated(it, boxes.value.length > 0);
+      } catch(e){}
+    }
+    async function saveBoxes() {
+      if (!images.value.length) return;
+      const it = images.value[curIdx.value];
+      try {
+        await postJSON('/api/label/save?mode='+mode.value, { image_path: it.path, boxes: boxes.value });
+        ElementPlus.ElMessage.success('保存成功');
+        setAnnotated(it, boxes.value.length > 0);
+      } catch(e){}
+    }
+    // 同步标注状态：列表 + 预览条（两者是独立数组，必须一起更新，绿点才实时）
+    function setAnnotated(it, v) {
+      it.annotated = v;
+      if (previewImages.value.length) {
+        const pv = previewImages.value.find(x => x.rel === it.rel);
+        if (pv) pv.annotated = v;
+      }
+    }
+    async function finishDataset() {
+      if (!images.value.length) { ElementPlus.ElMessage.warning('请先加载数据集'); return; }
+      await saveBoxes();
+      const total = images.value.length;
+      const unannotated = images.value.filter(i => !i.annotated).length;
+      if (unannotated === total) { ElementPlus.ElMessage.warning('还没有任何标注，无法完成（先标注至少一张）'); return; }
+      const msg = unannotated === 0
+        ? `全部 ${total} 张都已标注`
+        : `有 ${unannotated} 张未标注（质量差跳过）`;
+      const tip = mode.value === 'obj'
+        ? '完成：布片裁剪进 OCR 标注(ocrtext) + 标注数据追加到 det_fabric 训练集（不删旧数据，可跨数据集累积）'
+        : '完成：标注数据追加到 det_text 训练集 + 文字裁剪进 rec_text（不删旧数据）';
+      if (!confirm(`完成标注？\n\n${msg}\n${tip}\n\n未标注的图片会被删除；训练集只追加不清空（点训练后才清空）`)) return;
+      try {
+        const r = await getJSON('/api/label/finish', {mode: mode.value, dataset: currentDataset.value, ratio: ratio.value, seed: seed.value, text_enabled: textEnabled.value});
+        let m = `完成！已标注 ${r.annotated} 张 / 删除 ${r.skipped} 张`;
+        if (r.mode === 'obj') {
+          m += ` · det_fabric ${r.train}+${r.val} · OCR裁剪 ${r.ocr_images} 张`;
+        } else {
+          m += ` · det_text ${r.train}+${r.val}` + (r.rec_crops ? ` · rec ${r.rec_crops} 条` : '');
+        }
+        ElementPlus.ElMessage.success(m);
+        await loadDatasets();
+        if (mode.value === 'obj') await loadImages();  // 刷新未标注图的状态
+      } catch(e){}
+    }
+    function statusClass(s) { return {running:'orange',success:'green',failed:'red'}[s] || ''; }
+
+    // 防止同一个任务重复弹窗
+    const _cleanupAsked = new Set();
+    async function maybeAskCleanup(tasks) {
+      for (const t of (tasks||[])) {
+        if (t.status === 'running') continue;
+        if (_cleanupAsked.has(t.task_id)) continue;
+        // 只对训练类任务（train:det / train:rec）提示；val 等不用
+        if (!t.name || !t.name.startsWith('train:')) continue;
+        _cleanupAsked.add(t.task_id);
+        try {
+          const info = await getJSON(`/api/train/tasks/${t.task_id}/cleanup_info`);
+          if (!info || !info.report || info.report.count === 0) continue;
+          const sz = info.report.total_gb >= 1 ? `${info.report.total_gb} GB` : `${info.report.total_mb} MB`;
+          const kindText = info.kind === 'rec' ? '文字识别' : info.kind === 'det' ? '目标检测' : '';
+          ElementPlus.ElMessageBox({
+            title: `训练完成 · ${kindText}`,
+            message: `检测到训练产生了 <b>${info.report.count}</b> 个中间 checkpoint 文件，约 <b>${sz}</b>。<br/>是否删除以节省空间？（保留项：best/latest 权重、导出模型、配置/日志 不会被删）`,
+            dangerouslyUseHTMLString: true,
+            confirmButtonText: `删除节省 ${sz}`,
+            cancelButtonText: '保留',
+            showCancelButton: true,
+            type: 'info',
+          }).then(async () => {
+            try {
+              const r = await postJSON(`/api/train/tasks/${t.task_id}/cleanup`);
+              const d = r.deleted || {};
+              const saved = (d.total_gb || 0) >= 1 ? `${d.total_gb} GB` : `${d.total_mb} MB`;
+              ElementPlus.ElMessage.success(`已清理 ${d.count || 0} 个文件，节省 ${saved}`);
+              // 若在日志详情里把 meta 同步到 activeTask
+              if (activeTask.value && activeTask.value.task_id === t.task_id) activeTask.value.meta = { ...(activeTask.value.meta||{}), cleanup: d };
+            } catch(e) {
+              ElementPlus.ElMessage.error('清理失败：' + (e && e.message));
+            }
+          }).catch(()=>{});
+        } catch(e) {}
+      }
+    }
+
+    // =================== 训练 ===================
+    // 记录任务上一次状态：训练从 running → 结束 时自动刷新模型列表（新模型实时进下拉）
+    const _taskStates = {};
+    async function loadTasks() {
+      const r = await getJSON('/api/train/tasks');
+      tasks.value = r.tasks;
+      const finished = (tasks.value||[]).some(t => _taskStates[t.task_id] === 'running' && t.status !== 'running');
+      (tasks.value||[]).forEach(t => _taskStates[t.task_id] = t.status);
+      if (finished) {
+        await loadModels();
+        await maybeAskCleanup(tasks.value);
+      }
+    }
+    async function loadTask(id) {
+      if (!id) return;
+      try {
+        const r = await getJSON(`/api/train/tasks/${id}`, {from_line: activeTask.value ? activeTask.value.lines_total : 0});
+        if (activeTask.value && activeTask.value.task_id === id && r.lines_from) {
+          activeTask.value = { ...r, lines: activeTask.value.lines.concat(r.lines) };
+        } else {
+          activeTask.value = r;
+        }
+        await nextTick();
+        const el = document.querySelector('.log-view');
+        if (el) el.scrollTop = el.scrollHeight;
+      } catch(e){}
+    }
+    function showLog(row) { loadTask(row.task_id || row); }
+    async function startLogLoop() {
+      if (logTimer.value) return;
+      logTimer.value = setInterval(() => {
+        if (!logPoll.value) return;
+        if (activeTask.value && activeTask.value.status === 'running') loadTask(activeTask.value.task_id);
+        loadTasks();
+      }, 2000);
+    }
+    async function loadModels() {
+      const r = await getJSON('/api/models/');
+      modelList.det = r.det || [];
+      modelList.ocr = r.ocr || [];
+      detModelChoices.value = (modelList.det||[]).map(m => ({name:m.name, path:m.path}));
+      // det 模型默认：各自任务的第一项（fabric 任务优先 fabric/yolo，text 任务优先 text/yolo）
+      if (!fabricP.model && detModelChoices.value.length) {
+        const f = fabricModelChoices.value[0];
+        fabricP.model = f ? f.path : detModelChoices.value[0].path;
+        const t = textModelChoices.value[0];
+        textP.model = t ? t.path : detModelChoices.value[0].path;
+      }
+      // rec 模型：预训练 mobile/server + 已训练 rec 模型（含 best.pdparams 才可继续增量）
+      const base = recChoices.value.slice(0, 2);
+      (modelList.ocr||[]).forEach(m => {
+        if (m.files !== undefined && m.has_pdparams) {
+          base.push({label: m.name + '（已训练，继续增量）', value: m.name});
+        }
+      });
+      recChoices.value = base;
+    }
+    async function startTrainDet(kind) {
+      const p = kind === 'text' ? textP : fabricP;
+      try {
+        const r = await postJSON('/api/train/det', {...p});
+        lastTask.value = r.task_id;
+        ElementPlus.ElMessage.success('已启动：' + r.cmd);
+        route.value = 'train';
+        await loadTasks();
+        activeTask.value = null;
+        await loadTask(r.task_id);
+        startLogLoop();
+      } catch(e){}
+    }
+    async function startTrainRec() {
+      try {
+        const r = await postJSON('/api/train/rec', {...recP});
+        lastTask.value = r.task_id;
+        ElementPlus.ElMessage.success('已启动：' + r.cmd);
+        route.value = 'train';
+        await loadTasks();
+        activeTask.value = null;
+        await loadTask(r.task_id);
+        startLogLoop();
+      } catch(e){}
+    }
+    function downloadModel(k, n) { window.open(`/api/models/download/${encodeURIComponent(k)}/${encodeURIComponent(n)}`); }
+    // 对已有检测模型跑测试集验证：fabric 模型 → det_fabric，text 模型 → det_text
+    async function startVal(row) {
+      if (!row || !row.path) return;
+      const ds = row.name.startsWith('text') ? 'det_text' : 'det_fabric';
+      try {
+        const r = await postJSON('/api/train/val', { model: row.path, dataset: ds });
+        ElementPlus.ElMessage.success('验证任务已启动：' + (r.task_id||'').slice(0, 8) + '…（训练页可看日志）');
+      } catch(e){}
+    }
+    async function deleteModel(k, n) {
+      if (!confirm(`删除 ${k}/${n}?`)) return;
+      try {
+        await fetch(`/api/models/${encodeURIComponent(k)}/${encodeURIComponent(n)}`, {method:'DELETE'});
+        ElementPlus.ElMessage.success('已删除'); loadModels();
+      } catch(e){}
+    }
+    // 训练页模型下拉里的删除按钮：删掉后同步下拉列表，若删的是当前选中则重置
+    async function askDeleteModel(kind, name) {
+      if (!confirm(`删除模型 ${name} ？（文件将被永久删除，不可恢复）`)) return;
+      try {
+        await fetch(`/api/models/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`, {method:'DELETE'});
+        ElementPlus.ElMessage.success('已删除');
+        if (kind === 'det') {
+          detModelChoices.value = detModelChoices.value.filter(m => m.name !== name);
+          if (!fabricModelChoices.value.some(m => m.path === fabricP.model)) fabricP.model = (fabricModelChoices.value[0]||{}).path || '';
+          if (!textModelChoices.value.some(m => m.path === textP.model)) textP.model = (textModelChoices.value[0]||{}).path || '';
+        } else {
+          recChoices.value = recChoices.value.filter(m => m.value !== name);
+          if (recP.model === name) recP.model = 'mobile';
+        }
+      } catch(e){}
+    }
+
+    // ========== onMounted ==========
+    onMounted(async () => {
+      self.$root = self;
+      self.$emit = (evt, payload) => {
+        if (evt === 'route-goto') route.value = payload;
+        if (evt === 'task-open') loadTask(payload);
+      };
+      await loadDatasets();
+      await loadClasses();
+      await loadModels();
+    });
+
+    watch(mode, loadClasses);
+    watch(route, (v) => {
+      if (v === 'label-obj' || v === 'label-ocr') {
+        nextTick(() => {
+          // 切到标注页时：若当前数据集 kind 与页面模式不符（如 obj 数据集带进 OCR 页），清空强制重选
+          const m = v === 'label-obj' ? 'obj' : 'ocr';
+          const d = datasets.value.find(x => x.name === currentDataset.value);
+          if (currentDataset.value && d && (d.kind || 'obj') !== m) {
+            currentDataset.value = '';
+            images.value = [];
+          }
+          loadClasses();
+          resizeCanvas();
+          if (images.value.length) loadCurrentImage();
+        });
+      }
+    });
+
+    Object.assign(self, {
+      route, pageTitle, mode, labelDatasets,
+      // data
+      datasets, previewImages, previewFrom, previewTotal, currentDataset, finishedFlag, lastTask,
+      lastUploadResult, uploadTotal, uploadedFiles, imageFound, uploadPercent, uploadStatus,
+      // label
+      images, curIdx, boxes, tool, textEnabled, activeCls, classList, ratio, seed, mouseXY, mouseBox,
+      imgInfo, textInputPrompt, textInputValue,
+      // train
+      trainTab, fabricP, textP, recP, tasks, activeTask, logPoll, modelList,
+      detModelChoices, fabricModelChoices, textModelChoices, recChoices, statusClass,
+      // actions
+      clickFolderInput, onFolderSelected, beforeUploadSingle,
+      loadDatasets, previewDataset, previewPage, jumpToLabel, showApi,
+      loadImages, gotoImage, loadCurrentImage, initCanvas, clsChipClass, onDatasetChanged,
+      delSel, delBox, selectBox, undoBox, prevImg, nextImg, imgPrev, imgNext, saveBoxes, finishDataset, textOk, textCancel,
+      loadTasks, loadTask, showLog, startTrainDet, startTrainRec, startLogLoop, downloadModel, deleteModel, askDeleteModel, startVal, loadModels,
+    });
+    return self;
+  }
+};
+
+const app = createApp(App);
+app.use(ElementPlus);
+for (const [k,v] of Object.entries(ElementPlusIconsVue)) app.component(v.name || k, v);
+app.mount('#app');
+</script>
+</body>
+</html>

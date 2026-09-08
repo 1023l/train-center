@@ -1,0 +1,14 @@
+# Train Center Web 后端运行时（MVP）
+# 启动命令：uvicorn server.main:app --host 0.0.0.0 --port 8000
+# 注意：torch / paddle / ultralytics / paddlex 训练依赖不在这里
+#   因为训练脚本跑在独立子进程中，使用对应的 conda 环境（yolo-bench 或 paddle-ocr）
+#   服务器本身只需以下轻量依赖即可启动。
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+pydantic>=2.5
+PyYAML>=6.0
+numpy>=1.24
+opencv-python-headless>=4.8
+Pillow>=10.0
