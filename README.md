@@ -1,6 +1,9 @@
-# 超算中心 · 布料 OCR 标注训练一体化平台
+# 超算中心 · 标注训练一体化平台
 
-一套面向**鞋布片文字识别（fabric→text→rec 三阶段）**业务的端到端平台，把「数据上卷、去重、标注、格式转换、训练、模型管理」的完整流水线装进一个 FastAPI + Vue 3 Web 应用里。与同级目录的 **`fabric-algo`（在线推理/实时计数软件）**配合形成「训练→部署」闭环。
+一套**通用的「目标检测 + OCR 文字识别」标注训练平台**（fabric→text→rec 三阶段流水线），把「数据上卷、去重、标注、格式转换、训练、模型管理」的完整流水线装进一个 FastAPI + Vue 3 Web 应用里。与同级目录的 **`fabric-algo`（在线推理/实时计数软件）**配合形成「训练→部署」闭环。
+
+> 平台能力与行业解耦：目标检测（YOLO）、文字区域检测（横/竖排）、OCR 识别训练（PaddleOCR）。
+> 当前以**纺织布片计数 / 鞋码识别**作为参考实现，数据集代号 `fabric` / `text` / `rec` 为业务沿用命名，不绑定行业。
 
 ```
 c:\projects\
@@ -15,9 +18,9 @@ c:\projects\
 | 模块 | 能力 |
 |---|---|
 | **数据管理** | 上传压缩包 / 单文件夹（子目录代表款式）→ 解压 → 视频抽帧 → 基于感知哈希去重 → 数据集自动划分 train/val |
-| **标注工具** | Fabric.js + 原生 Canvas 实现两种模式：<br>① **目标检测模式**（布片框/文字区域，支持矩形框+4点旋转框；旋转框保存 Tab 分隔的坐标与文本）<br>② **OCR 模式**（切换横文 `text_h` / 竖文 `text_v` 两个按钮；竖文框导出后会自动 rot90 k=3 再裁剪作为 rec 数据） |
+| **标注工具** | Fabric.js + 原生 Canvas 实现两种模式：<br>① **目标检测模式**（目标框/文字区域，支持矩形框+4点旋转框；旋转框保存 Tab 分隔的坐标与文本）<br>② **OCR 模式**（切换横文 `text_h` / 竖文 `text_v` 两个按钮；竖文框导出后会自动 rot90 k=3 再裁剪作为 rec 数据） |
 | **训练** | det_fabric / det_text 用 **YOLO26（ultralytics）**；rec_text 用 **PP-OCRv5（PaddleOCR）**。<br>三阶段顺序固定 `det_fabric → det_text → rec_text`，串行启动。训练过程实时日志/轮询、完成后自动刷新模型列表、**并弹窗提示清理中间 checkpoint 体积**。 |
-| **模型管理** | 版本化命名 `[dataset]YYYYMMDDV[ver]`（V1=YOLO26n、V2=RetDR 等架构变化时递增）。每个模型：预览、`.metrics.json`、删除（级联删除附属 `.metrics.json`）。 |
+| **模型管理** | 版本化命名 `[dataset]YYYYMMDDV[ver]`（V1=YOLO26n、V2=RetDR 等架构变化时递增）。每个模型：预览、`.metrics.json`、删除（级联删除附属 `.metrics.json`）。**一键导出 3 个最新模型打包 zip**，算法侧上传后自动转换上线。 |
 | **日志** | 所有训练/上传/去重/导出任务统一管理：实时 log、状态 running/success/failed、elapsed。 |
 
 ---
@@ -98,10 +101,9 @@ taskkill /F /PID <PID>
                       det: 扫 runs/<fabric*,text*>/weights/，除 best.pt 之外全部可删
       │
       ▼
-[8 导出 & 部署]   交给姐妹项目 fabric-algo：
-                   _export_det_onnx.py（YOLO end2end NMS opset 17 imgsz 640）
-                   _export_rec_onnx.py（Paddle → ONNX 动态宽）
-                   _trt11_onnx.py / _trt11_rec_onnx.py → .engine（TRT 11.2 eval 版，FP32）
+[8 导出 & 部署]   交给姐妹项目 fabric-algo 的 tools/（配置集中在 tools/config.yaml）：
+                   export_onnx.py（YOLO end2end NMS opset 17 imgsz 640 / Paddle → ONNX 动态宽）
+                   build_engine.py → .engine（TRT 11.2 eval 版，FP32）
 ```
 
 ### 3.1 版本命名（硬约束）
@@ -221,7 +223,7 @@ Pillow>=10.0
 2. **YOLO 训练报 RuntimeError：label 里有文本？** → 旧版本导出未 strip 文本内容，现在 `core/export.py` 已保证 det_text label 是**纯 YOLO 坐标**，text 内容只保存在标注文件里（`\t` 分隔坐标与文本），会被 rec 导出裁剪时消费。
 3. **中文路径下 cv2.imread/imwrite 失败？** → 全部改用 `utils.cv_imread / cv_imwrite`（`np.fromfile + cv2.imdecode` / `cv2.imencode + .tofile`）。
 4. **为什么有两个 "V1"（rec 的版本和 PP-OCRv5 的 v5）？** → 我们自己的版本号是文件名后缀 `V1..V99`，PaddleOCRv5 是模型家族代号 `PP-OCRv5_*_rec`，两者没关系。
-5. **TRT engine 去哪了？** → 本仓库**只产出 .pt 和 PaddleOCR inference**，真正的 ONNX/TRT engine 在 **fabric-algo** 项目中由 `_export_det_onnx.py / _trt11_onnx.py` 系列脚本生成。
+5. **TRT engine 去哪了？** → 本仓库**只产出 .pt 和 PaddleOCR inference**，真正的 ONNX/TRT engine 在 **fabric-algo** 项目中由 `tools/export_onnx.py` / `tools/build_engine.py` 生成（或在算法侧页面「模型管理」上传模型包自动转换）。
 6. **中间 checkpoint 越积越大？** → 训练完成后 Web 前端会自动弹窗，一键清理。规则统一写在 [core/cleanup_artifacts.py](./core/cleanup_artifacts.py)。
 
 ---

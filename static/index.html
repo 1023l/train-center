@@ -335,7 +335,7 @@
         <div v-if="route==='train'">
           <div class="card mb">
             <el-tabs v-model="trainTab">
-              <el-tab-pane label="① Det Fabric 鞋布检测" name="fabric">
+              <el-tab-pane label="① Det Fabric 目标检测" name="fabric">
                 <div class="row mb">
                   <span>数据集</span>
                   <span class="muted">data/det_fabric（固定）</span>
@@ -530,7 +530,7 @@ const App = {
     const route = ref('data');
     const pageTitle = computed(() => ({
       'data': '📁 数据管理 — 文件夹上传（子目录按款式）',
-      'label-obj': '📍 Obj 标注 — 鞋型布（fabric）',
+      'label-obj': '📍 Obj 标注 — 目标检测（fabric）',
       'label-ocr': '✍️ OCR 标注 — 方向 text_h/text_v + 文字',
       'train': '🚀 训练',
       'models': '📦 模型管理'
@@ -1222,7 +1222,7 @@ const App = {
         ? `全部 ${total} 张都已标注`
         : `有 ${unannotated} 张未标注（质量差跳过）`;
       const tip = mode.value === 'obj'
-        ? '完成：布片裁剪进 OCR 标注(ocrtext) + 标注数据追加到 det_fabric 训练集（不删旧数据，可跨数据集累积）'
+        ? '完成：目标裁剪进 OCR 标注(ocrtext) + 标注数据追加到 det_fabric 训练集（不删旧数据，可跨数据集累积）'
         : '完成：标注数据追加到 det_text 训练集 + 文字裁剪进 rec_text（不删旧数据）';
       if (!confirm(`完成标注？\n\n${msg}\n${tip}\n\n未标注的图片会被删除；训练集只追加不清空（点训练后才清空）`)) return;
       try {

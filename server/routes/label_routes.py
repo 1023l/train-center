@@ -235,7 +235,7 @@ def finish_dataset(
     """
     标注「完成」：当前数据集标注收尾。
     - obj 模式：未标注图（txt 空/缺失，视为质量差跳过）的 txt 删除 → 生成 data/det_fabric(train/val)
-               同时把裁剪布片写入 _uploads/ocrtext/<数据集名>，供 OCR 标注页选择。
+               同时把裁剪目标写入 _uploads/ocrtext/<数据集名>，供 OCR 标注页选择。
     - ocr 模式：同样跳过未标注图 → 生成 data/det_text + data/rec_text（text_enabled 时）。
     """
     p = _resolve_dataset_dir(dataset)
@@ -265,7 +265,7 @@ def finish_dataset(
 
     if mode == "obj":
         # 2a) obj 完成：
-        #   - 布片按 fabric 框裁剪 → _uploads/ocrtext/<数据集名>（OCR 标注数据源）
+        #   - 目标按 fabric 框裁剪 → _uploads/ocrtext/<数据集名>（OCR 标注数据源）
         #   - 标注数据本身追加进 det_fabric（train/val 划分，不删旧数据，可跨数据集累积）
         ocr_dir = ROOT / "data" / "_uploads" / "ocrtext" / p.name
         if ocr_dir.exists():
