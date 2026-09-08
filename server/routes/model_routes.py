@@ -4,17 +4,17 @@
 
 from __future__ import annotations
 
+import io
 import json
-import os
 import re
-import tempfile
 import time
+import zipfile
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, Response
-from starlette.background import BackgroundTask
+from fastapi.responses import JSONResponse, FileResponse, Response, StreamingResponse
 
 from core.common import ROOT
 
@@ -95,6 +95,7 @@ def download_model(kind: str, name: str):
 def export_bundle():
     """一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重目录）打包为 zip。
 
+    流式打包：响应头立即返回（浏览器马上弹出下载提示），边打包边传输。
     包内结构（fabric-algo 上传接口约定的 manifest.json 格式）：
         manifest.json
         det/fabric{ver}.pt
@@ -121,22 +122,46 @@ def export_bundle():
         },
     }
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
-    tmp.close()
-    import zipfile
-    # 权重文件压缩收益极低，STORED 打包更快
-    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED) as zf:
+    def gen():
+        # 自定义 sink：zipfile 写入的数据流式转发给 HTTP 响应（chunked）
+        sink = _StreamingZip()
+        # 权重文件压缩收益极低，STORED 打包最快
+        zf = zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED)
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        yield from sink.drain()
         zf.write(fabric, f"det/{fabric.name}")
+        yield from sink.drain()
         zf.write(text, f"det/{text.name}")
+        yield from sink.drain()
         for f in sorted(rec.rglob("*")):
             # 导出 ONNX 只需要 best.pdparams；inference.yml 一并带上便于追溯
             if f.is_file() and f.name in {"best.pdparams", "inference.yml"}:
                 zf.write(f, f"ocr/{rec.name}/{f.name}")
+                yield from sink.drain()
+        zf.close()  # central directory 在 close 时写入
+        yield from sink.drain()
 
-    filename = f"model_bundle_{time.strftime('%Y%m%d_%H%M')}.zip"
-    return FileResponse(tmp.name, filename=filename, media_type="application/zip",
-                        background=BackgroundTask(os.unlink, tmp.name))
+    filename = f"model_bundle_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+    return StreamingResponse(gen(), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+class _StreamingZip(io.RawIOBase):
+    """zipfile 的写入 sink：捕获写入字节，通过 drain() 流式产出。"""
+
+    def __init__(self):
+        self._chunks: deque[bytes] = deque()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, b) -> int:
+        self._chunks.append(bytes(b))
+        return len(b)
+
+    def drain(self):
+        while self._chunks:
+            yield self._chunks.popleft()
 
 
 def _latest_det(prefix: str) -> Path | None:
