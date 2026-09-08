@@ -430,7 +430,10 @@
           <div class="card mb">
             <div class="row between mb">
               <b>检测模型（models/det）</b>
-              <el-button size="small" @click="loadModels">🔄 刷新</el-button>
+              <span>
+                <el-button size="small" type="primary" @click="exportBundle">📦 一键导出3个模型（打包）</el-button>
+                <el-button size="small" @click="loadModels">🔄 刷新</el-button>
+              </span>
             </div>
             <el-table :data="modelList.det" size="small" stripe>
               <el-table-column prop="name" label="名称"></el-table-column>
@@ -1358,6 +1361,8 @@ const App = {
       } catch(e){}
     }
     function downloadModel(k, n) { window.open(`/api/models/download/${encodeURIComponent(k)}/${encodeURIComponent(n)}`); }
+    // 一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重）打包 zip
+    function exportBundle() { window.open('/api/models/export_bundle'); }
     // 对已有检测模型跑测试集验证：fabric 模型 → det_fabric，text 模型 → det_text
     async function startVal(row) {
       if (!row || !row.path) return;

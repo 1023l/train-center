@@ -4,11 +4,17 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, Response
+from starlette.background import BackgroundTask
 
 from core.common import ROOT
 
@@ -83,6 +89,71 @@ def download_model(kind: str, name: str):
     buf.seek(0)
     headers = {"Content-Disposition": f"attachment; filename=\"{name}.zip\""}
     return Response(content=buf.read(), media_type="application/zip", headers=headers)
+
+
+@router.get("/export_bundle")
+def export_bundle():
+    """一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重目录）打包为 zip。
+
+    包内结构（fabric-algo 上传接口约定的 manifest.json 格式）：
+        manifest.json
+        det/fabric{ver}.pt
+        det/text{ver}.pt
+        ocr/rec{ver}/best.pdparams
+    """
+    fabric = _latest_det("fabric")
+    text = _latest_det("text")
+    rec = _latest_rec_dir()
+    missing = [n for n, p in (("fabric", fabric), ("text", text), ("rec", rec)) if p is None]
+    if missing:
+        raise HTTPException(404, f"缺少模型产物: {', '.join(missing)}")
+
+    def ver_of(name: str) -> str:
+        m = re.search(r"(\d{8}V\d+)", name)
+        return m.group(1) if m else ""
+
+    manifest = {
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "models": {
+            "fabric": {"version": ver_of(fabric.name), "file": f"det/{fabric.name}"},
+            "text": {"version": ver_of(text.name), "file": f"det/{text.name}"},
+            "rec": {"version": ver_of(rec.name), "dir": f"ocr/{rec.name}"},
+        },
+    }
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp.close()
+    import zipfile
+    # 权重文件压缩收益极低，STORED 打包更快
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        zf.write(fabric, f"det/{fabric.name}")
+        zf.write(text, f"det/{text.name}")
+        for f in sorted(rec.rglob("*")):
+            # 导出 ONNX 只需要 best.pdparams；inference.yml 一并带上便于追溯
+            if f.is_file() and f.name in {"best.pdparams", "inference.yml"}:
+                zf.write(f, f"ocr/{rec.name}/{f.name}")
+
+    filename = f"model_bundle_{time.strftime('%Y%m%d_%H%M')}.zip"
+    return FileResponse(tmp.name, filename=filename, media_type="application/zip",
+                        background=BackgroundTask(os.unlink, tmp.name))
+
+
+def _latest_det(prefix: str) -> Path | None:
+    """models/det 下 {prefix}YYYYMMDDVn.pt 取文件名最新的一份。"""
+    pat = re.compile(rf"^{prefix}\d{{8}}V\d+\.pt$")
+    cands = sorted((f for f in DET_DIR.glob(f"{prefix}*.pt") if pat.match(f.name)),
+                   key=lambda f: f.name)
+    return cands[-1] if cands else None
+
+
+def _latest_rec_dir() -> Path | None:
+    """models/ocr 下 recYYYYMMDDVn/ 目录（须含 best.pdparams）取最新。"""
+    pat = re.compile(r"^rec\d{8}V\d+$")
+    cands = sorted((d for d in OCR_DIR.iterdir()
+                    if d.is_dir() and pat.match(d.name) and (d / "best.pdparams").is_file()),
+                   key=lambda d: d.name)
+    return cands[-1] if cands else None
 
 
 @router.delete("/{kind}/{name}")
