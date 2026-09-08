@@ -1361,8 +1361,36 @@ const App = {
       } catch(e){}
     }
     function downloadModel(k, n) { window.open(`/api/models/download/${encodeURIComponent(k)}/${encodeURIComponent(n)}`); }
-    // 一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重）打包 zip
-    function exportBundle() { window.open('/api/models/export_bundle'); }
+    // 一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重）打包 zip。
+    // 分两段反馈：服务端打包（约150MB，需几秒）→ 触发浏览器保存到「下载」文件夹
+    async function exportBundle() {
+      ElementPlus.ElMessage.info('服务端正在打包 3 个模型（约 150MB，需几秒），完成后自动开始下载…');
+      let resp;
+      try {
+        resp = await fetch('/api/models/export_bundle');
+      } catch (e) {
+        ElementPlus.ElMessage.error('网络错误：' + e);
+        return;
+      }
+      if (!resp.ok) {
+        let detail = 'HTTP ' + resp.status;
+        try { const t = await resp.json(); detail = t.detail || t.msg || detail; } catch (_) {}
+        ElementPlus.ElMessage.error('导出失败：' + detail);
+        return;
+      }
+      const cd = resp.headers.get('content-disposition') || '';
+      const m = cd.match(/filename="?([^";]+)"?/i);
+      const fname = m ? m[1] : 'model_bundle.zip';
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+      ElementPlus.ElMessage.success(`已开始保存：${fname}（${(blob.size / 1e6).toFixed(0)} MB）→ 浏览器「下载」文件夹`);
+    }
     // 对已有检测模型跑测试集验证：fabric 模型 → det_fabric，text 模型 → det_text
     async function startVal(row) {
       if (!row || !row.path) return;
