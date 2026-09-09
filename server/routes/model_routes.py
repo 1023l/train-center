@@ -1,5 +1,8 @@
 """
 模型管理：列出 models/ 下所有产物，下载，删除。
+
+rec 导出在本侧完成（paddle-ocr 环境）：一键导出与单个下载均直接产出
+rec{ver}_onnx.onnx（缓存复用），算法侧不再需要 paddle 环境。
 """
 
 from __future__ import annotations
@@ -7,6 +10,8 @@ from __future__ import annotations
 import io
 import json
 import re
+import subprocess
+import sys
 import time
 import zipfile
 from collections import deque
@@ -17,11 +22,36 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, Response, StreamingResponse
 
 from core.common import ROOT
+from .train_routes import PADDLE_PY_EXE
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 DET_DIR = ROOT / "models" / "det"
 OCR_DIR = ROOT / "models" / "ocr"
+EXPORT_SCRIPT = ROOT / "export_rec_onnx.py"
+
+
+def _ensure_rec_onnx(rec_dir: Path) -> Path:
+    """确保 rec 模型目录对应 ONNX 存在（export_rec_onnx.py 内有缓存，命中则秒回）。
+
+    调 paddle-ocr 环境子进程执行导出，首次约 1 分钟；失败抛 500 带日志尾部。
+    """
+    out = rec_dir.with_name(f"{rec_dir.name}_onnx.onnx")
+    pdparams = rec_dir / "best.pdparams"
+    if out.is_file() and out.stat().st_size > 0 \
+            and out.stat().st_mtime >= pdparams.stat().st_mtime:
+        return out
+    cmd = [PADDLE_PY_EXE, str(EXPORT_SCRIPT), "--src", str(rec_dir)]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", cwd=str(ROOT), timeout=600)
+    for line in (r.stdout or "").splitlines()[-5:] + (r.stderr or "").splitlines()[-5:]:
+        sys.stderr.write(f"[rec_export] {line}\n")
+    if r.returncode != 0:
+        tail = "\n".join(((r.stderr or "") + (r.stdout or "")).splitlines()[-8:])
+        raise HTTPException(500, f"rec ONNX 导出失败（{rec_dir.name}），日志尾部:\n{tail}")
+    if not out.is_file() or out.stat().st_size == 0:
+        raise HTTPException(500, f"rec ONNX 导出异常：产物缺失或 0 字节: {out}")
+    return out
 
 
 def _scan_dir(p: Path, kind: str):
@@ -78,14 +108,11 @@ def download_model(kind: str, name: str):
         raise HTTPException(404, "不存在")
     if target.is_file():
         return FileResponse(target, filename=name)
-    # 目录：打包成 zip 流
-    import zipfile
-    import io
+    # rec 模型目录：导出 ONNX（缓存复用）后打包为 zip（算法侧直接可转 engine）
+    onnx = _ensure_rec_onnx(target)
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in target.rglob("*"):
-            if f.is_file():
-                zf.write(f, f.relative_to(target).as_posix())
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        zf.write(onnx, onnx.name)
     buf.seek(0)
     headers = {"Content-Disposition": f"attachment; filename=\"{name}.zip\""}
     return Response(content=buf.read(), media_type="application/zip", headers=headers)
@@ -93,14 +120,16 @@ def download_model(kind: str, name: str):
 
 @router.get("/export_bundle")
 def export_bundle():
-    """一键导出 3 个最新模型（fabric.pt + text.pt + rec 权重目录）打包为 zip。
+    """一键导出 3 个最新模型打包为 zip（rec 已在本侧导出为 ONNX）。
 
     流式打包：响应头立即返回（浏览器马上弹出下载提示），边打包边传输。
+    rec ONNX 首次导出约 1 分钟（之后缓存秒回），发生在响应前。
+
     包内结构（fabric-algo 上传接口约定的 manifest.json 格式）：
         manifest.json
         det/fabric{ver}.pt
         det/text{ver}.pt
-        ocr/rec{ver}/best.pdparams
+        ocr/rec{ver}_onnx.onnx
     """
     fabric = _latest_det("fabric")
     text = _latest_det("text")
@@ -108,6 +137,8 @@ def export_bundle():
     missing = [n for n, p in (("fabric", fabric), ("text", text), ("rec", rec)) if p is None]
     if missing:
         raise HTTPException(404, f"缺少模型产物: {', '.join(missing)}")
+
+    rec_onnx = _ensure_rec_onnx(rec)   # 可能触发首次导出（~1min），失败抛 500
 
     def ver_of(name: str) -> str:
         m = re.search(r"(\d{8}V\d+)", name)
@@ -118,7 +149,7 @@ def export_bundle():
         "models": {
             "fabric": {"version": ver_of(fabric.name), "file": f"det/{fabric.name}"},
             "text": {"version": ver_of(text.name), "file": f"det/{text.name}"},
-            "rec": {"version": ver_of(rec.name), "dir": f"ocr/{rec.name}"},
+            "rec": {"version": ver_of(rec.name), "file": f"ocr/{rec_onnx.name}"},
         },
     }
 
@@ -133,11 +164,8 @@ def export_bundle():
         yield from sink.drain()
         zf.write(text, f"det/{text.name}")
         yield from sink.drain()
-        for f in sorted(rec.rglob("*")):
-            # 导出 ONNX 只需要 best.pdparams；inference.yml 一并带上便于追溯
-            if f.is_file() and f.name in {"best.pdparams", "inference.yml"}:
-                zf.write(f, f"ocr/{rec.name}/{f.name}")
-                yield from sink.drain()
+        zf.write(rec_onnx, f"ocr/{rec_onnx.name}")
+        yield from sink.drain()
         zf.close()  # central directory 在 close 时写入
         yield from sink.drain()
 

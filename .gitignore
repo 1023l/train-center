@@ -19,6 +19,7 @@
 /PaddleOCR/pretrain_models/**
 /PaddleOCR/inference/**
 /PaddleOCR/models/**
+models/ocr/paddle_model_temp_dir/
 
 # ---- 训练结果 / 可视化 / 曲线 ----
 /runs/**
