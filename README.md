@@ -1,181 +1,183 @@
-# 超算中心 · 标注训练一体化平台
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-一套**通用的「目标检测 + OCR 文字识别」标注训练平台**（fabric→text→rec 三阶段流水线），把「数据上卷、去重、标注、格式转换、训练、模型管理」的完整流水线装进一个 FastAPI + Vue 3 Web 应用里。与同级目录的 **`fabric-algo`（在线推理/实时计数软件）**配合形成「训练→部署」闭环。
+# train-center · One-Stop Annotation & Training Platform
 
-> 平台能力与行业解耦：目标检测（YOLO）、文字区域检测（横/竖排）、OCR 识别训练（PaddleOCR）。
-> 当前以**纺织布片计数 / 鞋码识别**作为参考实现，数据集代号 `fabric` / `text` / `rec` 为业务沿用命名，不绑定行业。
+A **general-purpose "object detection + OCR recognition" annotation & training platform** (fabric→text→rec three-stage pipeline) that packs the complete workflow of "data ingestion, dedup, annotation, format conversion, training, model management" into a single FastAPI + Vue 3 web app. It pairs with its sibling project **`fabric-algo` (online inference / real-time counting software)** in the same parent directory to close the "train → deploy" loop.
+
+> Platform capabilities are industry-agnostic: object detection (YOLO), text-region detection (horizontal/vertical), OCR recognition training (PaddleOCR).
+> The current **textile fabric counting / shoe-size recognition** serves as the reference implementation; dataset codes `fabric` / `text` / `rec` are legacy business naming, not industry-bound.
 
 ```
-c:\projects\
-├── train-center\   ← 本仓库（标注训练）
-└── fabric-algo\    ← 姐妹项目（推理与 Web 实时视频检测）
+projects\
+├── train-center\   ← this repo (annotation & training)
+└── fabric-algo\    ← sibling project (inference & web real-time video detection)
 ```
 
 ---
 
-## 1. 功能速览
+## 1. Feature Overview
 
-| 模块 | 能力 |
+| Module | Capabilities |
 |---|---|
-| **数据管理** | 上传压缩包 / 单文件夹（子目录代表款式）→ 解压 → 视频抽帧 → 基于感知哈希去重 → 数据集自动划分 train/val |
-| **标注工具** | Fabric.js + 原生 Canvas 实现两种模式：<br>① **目标检测模式**（目标框/文字区域，支持矩形框+4点旋转框；旋转框保存 Tab 分隔的坐标与文本）<br>② **OCR 模式**（切换横文 `text_h` / 竖文 `text_v` 两个按钮；竖文框导出后会自动 rot90 k=3 再裁剪作为 rec 数据） |
-| **训练** | det_fabric / det_text 用 **YOLO26（ultralytics）**；rec_text 用 **PP-OCRv5（PaddleOCR）**。<br>三阶段顺序固定 `det_fabric → det_text → rec_text`，串行启动。训练过程实时日志/轮询、完成后自动刷新模型列表、**并弹窗提示清理中间 checkpoint 体积**。 |
-| **模型管理** | 版本化命名 `[dataset]YYYYMMDDV[ver]`（V1=YOLO26n、V2=RetDR 等架构变化时递增）。每个模型：预览、`.metrics.json`、删除（级联删除附属 `.metrics.json`）。**一键导出 3 个最新模型打包 zip**，算法侧上传后自动转换上线。 |
-| **日志** | 所有训练/上传/去重/导出任务统一管理：实时 log、状态 running/success/failed、elapsed。 |
+| **Data Management** | Upload zip / folder (subdirectories = styles) → extract → video frame extraction → perceptual-hash dedup → automatic train/val split |
+| **Annotation Tool** | Fabric.js + native Canvas with two modes:<br>① **Object detection mode** (object boxes/text regions, rectangle + 4-point rotated boxes; rotated boxes save coordinates and text tab-separated)<br>② **OCR mode** (toggle horizontal `text_h` / vertical `text_v` buttons; vertical boxes are auto-rotated rot90 k=3 and cropped as rec data on export) |
+| **Training** | det_fabric / det_text use **YOLO26 (ultralytics)**; rec_text uses **PP-OCRv5 (PaddleOCR)**.<br>Stage order is fixed `det_fabric → det_text → rec_text`, started serially. Real-time logs/polling during training, auto model-list refresh on completion, **plus a popup prompting cleanup of intermediate checkpoints**. |
+| **Model Management** | Versioned naming `[dataset]YYYYMMDDV[ver]` (V1=YOLO26n, V2=RetDR; increments on architecture change). Per model: preview, `.metrics.json`, delete (cascade-deletes the attached `.metrics.json`). **One-click export of the 3 latest models as a zip bundle**; the inference side auto-converts and goes live after upload. |
+| **Logs** | All training/upload/dedup/export tasks managed centrally: real-time log, status running/success/failed, elapsed. |
 
 ---
 
-## 1.1 本仓库不包含的内容
+## 1.1 Not Included in This Repo
 
-- **PaddleOCR 源码**：请自行放到 `PaddleOCR/`（rec 训练调用 `tools/train.py`）。
-- **模型权重**（`.pt` / `.pdparams` / inference 二进制）：见 `models/`，不入库。
-- **原始图片与标注大文件**：`data/` 下 images/labels 已忽略。
+- **PaddleOCR source**: place it yourself under `PaddleOCR/` (rec training calls `tools/train.py`).
+- **Model weights** (`.pt` / `.pdparams` / inference binaries): see `models/`, not committed.
+- **Raw images & annotation bulk files**: images/labels under `data/` are ignored.
 
 ---
 
-## 2. 一键启动
+## 2. Quick Start
 
 ```bash
-cd c:\projects\train-center
-C:\Users\Administrator\miniconda3\envs\yolo-bench\python.exe -m uvicorn server.main:app --host 0.0.0.0 --port 8000
+cd train-center
+python -m uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 
-> Web 后端只依赖 `fastapi + uvicorn`（见 [requirements-server.txt](./requirements-server.txt)）。真正训练用子进程切环境：
-> - det_fabric / det_text：`yolo-bench` 环境（ultralytics + GPU）
-> - rec_text：`paddle-ocr` 环境（paddlepaddle-gpu + PaddleOCR 源码 `tools/train.py`）
+> The web backend depends only on `fastapi + uvicorn` (see [requirements-server.txt](./requirements-server.txt)). Actual training spawns subprocesses in dedicated environments:
+> - det_fabric / det_text: `yolo-bench` env (ultralytics + GPU)
+> - rec_text: `paddle-ocr` env (paddlepaddle-gpu + PaddleOCR source `tools/train.py`)
 
-打开浏览器：
+Open in browser:
 
-| 入口 | URL |
+| Entry | URL |
 |---|---|
-| 前端页面 | http://127.0.0.1:8000/ |
-| 健康检查 | http://127.0.0.1:8000/health |
-| Swagger 文档 | http://127.0.0.1:8000/docs |
+| Frontend | http://127.0.0.1:8000/ |
+| Health check | http://127.0.0.1:8000/health |
+| Swagger docs | http://127.0.0.1:8000/docs |
 
-停止服务：
+Stop the service:
 
 ```cmd
-netstat -ano | findstr :8000     # 记 PID
+netstat -ano | findstr :8000     # note the PID
 taskkill /F /PID <PID>
 ```
 
 ---
 
-## 3. 工作流（标准流程）
+## 3. Workflow (Standard Flow)
 
 ```
-[1 上传/上卷]   POST /api/data/upload (zip)  或  upload_folder (子目录=款式)
+[1 Upload/Ingest]   POST /api/data/upload (zip)  or  upload_folder (subdirs = styles)
       │
       ▼
-[2 视频抽帧]   extract_frames.py  (CLI / 数据页)
+[2 Frame Extract]   extract_frames.py  (CLI / data page)
       │
       ▼
-[3 去重]       dedup.py (pHash 阈值 8)
+[3 Dedup]           dedup.py (pHash threshold 8)
       │
       ▼
-[4 Web 标注]    det_fabric (目标检测矩形框)
+[4 Web Annotation]  det_fabric (object detection rectangles)
                  │
-                 └──► det_text (文字区域，矩形 / 4 点旋转框，text_h / text_v 类)
+                 └──► det_text (text regions, rectangle / 4-point rotated boxes, text_h / text_v classes)
                         │
-                        └──► rec_text (OCR 模式：每个框写识别文本；导出时自动旋转+裁剪)
+                        └──► rec_text (OCR mode: write recognized text per box; auto-rotate + crop on export)
       │
       ▼
-[5 导出]       核心 [core/export.py](./core/export.py) 统一做 YOLO 5 值矩形 / 纯坐标清洗 / 竖文旋转裁剪
-                 → det 输出 data/{det_fabric,det_text}/data.yaml + images/train|val + labels/train|val
-                 → rec 输出 data/rec_text/{crop_img/train|val, dict.txt, train.txt, val.txt}
+[5 Export]          Core [core/export.py](./core/export.py) handles YOLO 5-value rectangles / pure-coordinate cleaning / vertical-text rotation+crop
+                 → det outputs data/{det_fabric,det_text}/data.yaml + images/train|val + labels/train|val
+                 → rec outputs data/rec_text/{crop_img/train|val, dict.txt, train.txt, val.txt}
       │
       ▼
-[6 训练三阶段 · 串行]
+[6 Three-Stage Training · Serial]
     ├─ det_fabric  train.py  (YOLO26)   → models/det/fabricYYYYMMDDVn.pt + .metrics.json
     ├─ det_text    train.py  (YOLO26)   → models/det/textYYYYMMDDVn.pt   + .metrics.json
-    └─ rec_text    train_rec.py → 子进程调用 PaddleOCR/tools/train.py (PP-OCRv5 SVTR)
+    └─ rec_text    train_rec.py → subprocess calls PaddleOCR/tools/train.py (PP-OCRv5 SVTR)
                                   → PaddleOCR/output/PP-OCRv5_{mobile,server}_rec/
-                                  → 导出 inference 模型 → models/ocr/recYYYYMMDDVn/
-                                        （3 件套：inference.json / .pdiparams / .yml）
+                                  → export inference model → models/ocr/recYYYYMMDDVn/
+                                        (3 files: inference.json / .pdiparams / .yml)
       │
       ▼
-[7 训练完成]    • 前端轮询自动识别 running→完成，弹窗：「训练产生中间 checkpoint 共 N 个 / X GB
-                   是否清理节省空间？」（按钮"删除节省 X GB" / "保留"）
-                • 清理规则详见 [core/cleanup_artifacts.py](./core/cleanup_artifacts.py)
-                      rec: 删 iter_epoch_*.{pdopt,pdparams,states}，保留 best*/latest*/best_model/
-                      det: 扫 runs/<fabric*,text*>/weights/，除 best.pt 之外全部可删
+[7 Training Done]   • Frontend polling detects running→done and pops up: "Training produced N intermediate
+                       checkpoints / X GB — clean up to save space?" (buttons "Delete, save X GB" / "Keep")
+                    • Cleanup rules in [core/cleanup_artifacts.py](./core/cleanup_artifacts.py)
+                          rec: delete iter_epoch_*.{pdopt,pdparams,states}, keep best*/latest*/best_model/
+                          det: scan runs/<fabric*,text*>/weights/, everything except best.pt is deletable
       │
       ▼
-[8 导出 & 部署]   交给姐妹项目 fabric-algo 的 tools/（配置集中在 tools/config.yaml）：
-                   export_onnx.py（YOLO end2end NMS opset 17 imgsz 640 / Paddle → ONNX 动态宽）
-                   build_engine.py → .engine（TRT 11.2 eval 版，FP32）
+[8 Export & Deploy] Handed to sibling project fabric-algo's tools/ (config centralized in tools/config.yaml):
+                   export_onnx.py (YOLO end2end NMS opset 17 imgsz 640 / Paddle → ONNX dynamic width)
+                   build_engine.py → .engine (TRT 11.2 eval build, FP32)
 ```
 
-### 3.1 版本命名（硬约束）
+### 3.1 Version Naming (Hard Constraint)
 
-**`[dataset]YYYYMMDDV[版本号]`**，例如：
+**`[dataset]YYYYMMDDV[version]`**, e.g.:
 ```
-fabric20260828V2    # fabric 数据集 · 2026-08-28 · 架构 V2
-text20260831V1      # text   数据集 · 2026-08-31 · 架构 V1
-rec20260828V3       # rec    数据集 · 2026-08-28 · 架构 V3
+fabric20260828V2    # fabric dataset · 2026-08-28 · architecture V2
+text20260831V1      # text   dataset · 2026-08-31 · architecture V1
+rec20260828V3       # rec    dataset · 2026-08-28 · architecture V3
 ```
 
-版本号**仅在架构变化（如 YOLO26n→RetDR，PP-OCRv5 mobile→server）**时递增；同一天同一架构重复训练会覆盖最新 `.pt`。
+The version number **only increments on architecture changes (e.g. YOLO26n→RetDR, PP-OCRv5 mobile→server)**; retraining the same architecture on the same day overwrites the latest `.pt`.
 
 ---
 
-## 4. 目录结构
+## 4. Directory Structure
 
 ```
 train-center/
-├── README.md                 ← 本文件
-├── 启动说明.md                ← 快速启动（简版）
-├── requirements-server.txt   ← Web 后端依赖
-├── .gitignore                ← 已忽略大二进制：*.pt/*.pdparams/*.engine/*.onnx / runs / data/_* / PaddleOCR/output 等
+├── README.md                 ← this file
+├── 启动说明.md                ← quick-start notes (short version, Chinese)
+├── requirements-server.txt   ← web backend dependencies
+├── .gitignore                ← ignores large binaries: *.pt/*.pdparams/*.engine/*.onnx / runs / data/_* / PaddleOCR/output etc.
 │
-├── server/                   # FastAPI 后端
-│   ├── main.py               # app 入口；挂载 static、routes、CORS
+├── server/                   # FastAPI backend
+│   ├── main.py               # app entry; mounts static, routes, CORS
 │   ├── routes/
-│   │   ├── data_routes.py    # 数据管理（上传/解压/抽帧/去重/划分）
-│   │   ├── label_routes.py   # 标注工具（读取保存标签、导出数据集）
-│   │   ├── train_routes.py   # 训练任务（3 阶段启动/停止/日志/cleanup_info+cleanup）
-│   │   └── model_routes.py   # 模型管理（列表/预览/删除·级联删 metrics）
+│   │   ├── data_routes.py    # data management (upload/extract/frames/dedup/split)
+│   │   ├── label_routes.py   # annotation tool (read/save labels, export datasets)
+│   │   ├── train_routes.py   # training tasks (3-stage start/stop/logs/cleanup_info+cleanup)
+│   │   └── model_routes.py   # model management (list/preview/delete · cascades metrics)
 │   └── services/
-│       └── task_manager.py   # 通用任务：子进程 popen + log(deque 10000 行) + meta
+│       └── task_manager.py   # generic tasks: subprocess popen + log (deque 10000 lines) + meta
 │
-├── static/                   # Vue 3 + Element Plus + Fabric.js 前端（单页 index.html）
-│   └── index.html            # 5 个 Tab：数据管理 / 标注 / 训练 / 模型 / 日志
+├── static/                   # Vue 3 + Element Plus + Fabric.js frontend (single-page index.html)
+│   └── index.html            # 5 tabs: Data / Annotation / Training / Models / Logs
 │
-├── core/                     # 纯业务库（可 CLI 直接调用）
-│   ├── common.py             # ROOT、中英文字体定位、cv_imread/cv_imwrite (中文路径安全)
-│   ├── export.py             # 标签 → YOLO 格式、竖文旋转、rec 裁剪；导出核心
-│   └── cleanup_artifacts.py  # det/rec 中间 checkpoint 扫描 / 删除；rec 保留 best/latest/inference
+├── core/                     # pure business library (CLI-callable)
+│   ├── common.py             # ROOT, CJK font locator, cv_imread/cv_imwrite (non-ASCII path safe)
+│   ├── export.py             # labels → YOLO format, vertical-text rotation, rec cropping; export core
+│   └── cleanup_artifacts.py  # det/rec intermediate checkpoint scan/delete; rec keeps best/latest/inference
 │
-├── data/                     # 数据集 (images/labels/YOLO txt / crop_img)
-│   ├── det_fabric/           # 数据.yaml + images/train|val + labels/train|val
+├── data/                     # datasets (images/labels/YOLO txt / crop_img)
+│   ├── det_fabric/           # data.yaml + images/train|val + labels/train|val
 │   ├── det_text/
 │   └── rec_text/             # crop_img/train|val + dict.txt + train.txt/val.txt
 │
-├── models/                   # 训练产物（模型不入库，.gitignore 已屏蔽）
+├── models/                   # training artifacts (not committed; .gitignore blocks)
 │   ├── det/<name>.pt         + <name>.metrics.json
 │   └── ocr/<name>/{best.pdparams, inference.{json,pdiparams,yml}}
 │
-├── runs/                     # YOLO / PaddleOCR 训练输出（不入库；见 .gitignore）
+├── runs/                     # YOLO / PaddleOCR training outputs (not committed; see .gitignore)
 │
-├── PaddleOCR/                # PaddleOCR 源码（submodule 或直接嵌套均可；训练 rec 用）
-│   ├── tools/train.py        # train_rec.py 通过命令行参数触发 train -c configs/rec/xxx.yml
-│   ├── tools/export_model.py # 导出 inference 模型
-│   └── output/               # checkpoint（巨大量，.gitignore 已屏蔽）
+├── PaddleOCR/                # PaddleOCR source (submodule or nested; used for rec training)
+│   ├── tools/train.py        # train_rec.py triggers train -c configs/rec/xxx.yml via CLI args
+│   ├── tools/export_model.py # exports inference models
+│   └── output/               # checkpoints (huge, .gitignore blocked)
 │
-├── train.py                  # det_fabric / det_text 统一入口（CLI 或被 API 调）
-├── train_rec.py              # rec_text 统一入口（CLI 或被 API 调）
-├── ingest.py                 # 上传→解压→划分
-├── prepare_data.py           # 数据集格式转换
-├── dedup.py                  # 去重（pHash）
-├── extract_frames.py         # 视频抽帧
-└── label_tool.py             # 命令行版标注辅助工具（Web 上也可用）
+├── train.py                  # det_fabric / det_text unified entry (CLI or API-called)
+├── train_rec.py              # rec_text unified entry (CLI or API-called)
+├── ingest.py                 # upload → extract → split
+├── prepare_data.py           # dataset format conversion
+├── dedup.py                  # dedup (pHash)
+├── extract_frames.py         # video frame extraction
+└── label_tool.py             # CLI annotation helper (also usable from web)
 ```
 
 ---
 
-## 5. 依赖 & 双环境策略
+## 5. Dependencies & Dual-Environment Strategy
 
-**Web 服务环境**（`yolo-bench`）：
+**Web service env** (`yolo-bench`):
 
 ```
 fastapi>=0.110
@@ -188,62 +190,62 @@ opencv-python-headless>=4.8
 Pillow>=10.0
 ```
 
-**训练环境**（两份独立 conda env，API 端用 `PADDLE_PY_EXE` 绝对路径指向 paddle-ocr）：
+**Training envs** (two separate conda envs; the API uses the `PADDLE_PY_EXE` absolute path pointing to paddle-ocr):
 
-| 阶段 | conda env | 主要依赖 |
+| Stage | conda env | Key dependencies |
 |---|---|---|
 | det_fabric / det_text | `yolo-bench` | ultralytics (YOLO26), torch>=2.2, cuda |
-| rec_text              | `paddle-ocr` | paddlepaddle-gpu, PaddleOCR 源码目录, ppocr keys |
+| rec_text              | `paddle-ocr` | paddlepaddle-gpu, PaddleOCR source dir, ppocr keys |
 
 ---
 
-## 6. 关键 API
+## 6. Key APIs
 
 ```
-上传:     POST   /api/data/upload (zip multipart)            /api/data/upload_folder
-去重:     POST   /api/data/dedupe/:dataset
-导出:     POST   /api/data/export/:dataset
-标注:     GET    /api/labels/:dataset/:split/:img            读取
-          POST   /api/labels/:dataset/:split/:img            保存
-任务:     GET    /api/train/tasks                             列表
-          GET    /api/train/tasks/:id?from=xxx               日志 + meta
-          DELETE /api/train/tasks/:id                        终止
-训练:     POST   /api/train/det_fabric  det_text  rec_text   启动三阶段
-清理:     GET    /api/train/tasks/:id/cleanup_info           扫描中间产物（不删）
-          POST   /api/train/tasks/:id/cleanup                执行删除（节省 X GB/MB）
-模型:     GET    /api/models                                  列表
-          DELETE /api/models/(:category)/:name              删除（级联 metrics.json）
+Upload:     POST   /api/data/upload (zip multipart)            /api/data/upload_folder
+Dedup:      POST   /api/data/dedupe/:dataset
+Export:     POST   /api/data/export/:dataset
+Labels:     GET    /api/labels/:dataset/:split/:img            read
+            POST   /api/labels/:dataset/:split/:img            save
+Tasks:      GET    /api/train/tasks                             list
+            GET    /api/train/tasks/:id?from=xxx               logs + meta
+            DELETE /api/train/tasks/:id                        terminate
+Training:   POST   /api/train/det_fabric  det_text  rec_text   start stages
+Cleanup:    GET    /api/train/tasks/:id/cleanup_info           scan intermediates (no delete)
+            POST   /api/train/tasks/:id/cleanup                perform deletion (saves X GB/MB)
+Models:     GET    /api/models                                  list
+            DELETE /api/models/(:category)/:name              delete (cascades metrics.json)
 ```
 
 ---
 
-## 7. FAQ / 踩坑
+## 7. FAQ / Pitfalls
 
-1. **rec 训练全程不跑 eval？** → 把 `eval_batch_step=[0,2000]` 改小到 `[0,200]`。我们 61 张图 batch=8 时总迭代约 1400，原阈值只会到 2000 才跑一次 eval，等于没 eval，也就不会产出 best_accuracy.pdparams。
-2. **YOLO 训练报 RuntimeError：label 里有文本？** → 旧版本导出未 strip 文本内容，现在 `core/export.py` 已保证 det_text label 是**纯 YOLO 坐标**，text 内容只保存在标注文件里（`\t` 分隔坐标与文本），会被 rec 导出裁剪时消费。
-3. **中文路径下 cv2.imread/imwrite 失败？** → 全部改用 `utils.cv_imread / cv_imwrite`（`np.fromfile + cv2.imdecode` / `cv2.imencode + .tofile`）。
-4. **为什么有两个 "V1"（rec 的版本和 PP-OCRv5 的 v5）？** → 我们自己的版本号是文件名后缀 `V1..V99`，PaddleOCRv5 是模型家族代号 `PP-OCRv5_*_rec`，两者没关系。
-5. **TRT engine 去哪了？** → 本仓库**只产出 .pt 和 PaddleOCR inference**，真正的 ONNX/TRT engine 在 **fabric-algo** 项目中由 `tools/export_onnx.py` / `tools/build_engine.py` 生成（或在算法侧页面「模型管理」上传模型包自动转换）。
-6. **中间 checkpoint 越积越大？** → 训练完成后 Web 前端会自动弹窗，一键清理。规则统一写在 [core/cleanup_artifacts.py](./core/cleanup_artifacts.py)。
-
----
-
-## 8. 数据 / 模型文件仓库（Git LFS 或别仓库）
-
-大二进制（`.pt / .pdparams / .onnx / .engine / runs 导出图`）已全部 `.gitignore`。推荐：
-- 把这些产物上传到对象存储 / 网络共享盘；
-- 或用 Git LFS `git lfs track "*.pt" "*.pdparams" "*.onnx"`（若要启用会需要你在 git 初始化后执行，本仓库默认开启 `.gitignore` 排除）。
+1. **rec training never runs eval?** → Change `eval_batch_step=[0,2000]` down to `[0,200]`. With 61 images at batch=8, total iterations ≈ 1400; the original threshold only evals at step 2000 — effectively never — so best_accuracy.pdparams never gets produced.
+2. **YOLO training RuntimeError: text in labels?** → Older exports didn't strip text content; `core/export.py` now guarantees det_text labels are **pure YOLO coordinates**. Text content lives only in the annotation files (coordinates & text tab-separated) and is consumed during rec export cropping.
+3. **cv2.imread/imwrite failing on non-ASCII paths?** → All replaced with `utils.cv_imread / cv_imwrite` (`np.fromfile + cv2.imdecode` / `cv2.imencode + .tofile`).
+4. **Why two "V1"s (rec version vs PP-OCRv5's v5)?** → Our version number is the filename suffix `V1..V99`; PaddleOCRv5 is the model family code `PP-OCRv5_*_rec`. They are unrelated.
+5. **Where are the TRT engines?** → This repo **only produces .pt and PaddleOCR inference models**. Actual ONNX/TRT engines are generated in the **fabric-algo** project via `tools/export_onnx.py` / `tools/build_engine.py` (or auto-converted after uploading a model bundle on the inference side's "Model Management" page).
+6. **Intermediate checkpoints piling up?** → After training completes, the web frontend auto-pops a one-click cleanup dialog. Rules are unified in [core/cleanup_artifacts.py](./core/cleanup_artifacts.py).
 
 ---
 
-## 9. 与推理端 fabric-algo 对接
+## 8. Data / Model File Storage (Git LFS or Separate Repo)
+
+Large binaries (`.pt / .pdparams / .onnx / .engine / runs export images`) are all `.gitignore`d. Recommended:
+- Upload artifacts to object storage / network shares;
+- Or use Git LFS `git lfs track "*.pt" "*.pdparams" "*.onnx"` (requires running after git init; this repo defaults to `.gitignore` exclusion).
+
+---
+
+## 9. Integration with the Inference Side (fabric-algo)
 
 ```
 train-center                         fabric-algo
 ├─ models/det/fabric*.pt   ──► _export_det_onnx.py ──► .onnx ──► _trt11_onnx.py ──► models/fabric/*.engine
-├─ models/det/text*.pt     ──► 同上                                models/text/*.engine
+├─ models/det/text*.pt     ──► same                                models/text/*.engine
 └─ models/ocr/rec*         ──► _export_rec_onnx.py ──► .onnx ──► _trt11_rec_onnx.py ─► models/rec/*.engine
                                                                        │
                                                           counter.py / infer_business.py / web_server.py
-                                                          （实时检测 / 导出 mp4 / 计数线拖拽 / 模式切换）
+                                                          (real-time detection / mp4 export / counting-line drag / mode switch)
 ```
