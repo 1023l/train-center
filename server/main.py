@@ -61,11 +61,13 @@ app.add_middleware(
 # ---- 路由注册（延迟 import，避免服务启动时加载过重依赖） ----
 from routes.data_routes import router as data_router  # noqa: E402
 from routes.label_routes import router as label_router  # noqa: E402
+from routes.prelabel_routes import router as prelabel_router  # noqa: E402
 from routes.train_routes import router as train_router  # noqa: E402
 from routes.model_routes import router as model_router  # noqa: E402
 
 app.include_router(data_router)
 app.include_router(label_router)
+app.include_router(prelabel_router)
 app.include_router(train_router)
 app.include_router(model_router)
 

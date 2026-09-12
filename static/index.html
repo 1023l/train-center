@@ -301,6 +301,9 @@
               <div class="row between" style="flex-shrink:0;padding:2px 0">
                 <div></div>
                 <div class="right-toolbar">
+                  <el-button type="primary" size="small" :loading="prelabelBusy" @click="prelabelImage">✨ AI 预标注</el-button>
+                  <el-button size="small" :loading="prelabelBusy" @click="prelabelBatch">✨ 批量预标</el-button>
+                  <el-divider direction="vertical"></el-divider>
                   <el-button type="danger" size="small" @click="delSel">🗑 删 (D)</el-button>
                   <el-button size="small" @click="undoBox">↶ 撤 (Ctrl+Z)</el-button>
                   <el-divider direction="vertical"></el-divider>
@@ -579,6 +582,7 @@ const App = {
     const textInputPrompt = ref(false);
     const textInputValue = ref('');
     const undoStack = [];
+    const prelabelBusy = ref(false);   // AI 预标注进行中
 
     // ---- 训练（严格三阶段：det_fabric → det_text → rec_text）----
     const trainTab = ref('fabric');
@@ -1204,6 +1208,52 @@ const App = {
         setAnnotated(it, boxes.value.length > 0);
       } catch(e){}
     }
+
+    // =================== AI 预标注（VLM 出粗框，人工修正终审） ===================
+    function _iou(a, b) {
+      if (a.type !== 'rect' || b.type !== 'rect') return 0;
+      const x1 = Math.max(a.x1, b.x1), y1 = Math.max(a.y1, b.y1);
+      const x2 = Math.min(a.x2, b.x2), y2 = Math.min(a.y2, b.y2);
+      const inter = Math.max(0, x2-x1) * Math.max(0, y2-y1);
+      const aa = (a.x2-a.x1)*(a.y2-a.y1), bb = (b.x2-b.x1)*(b.y2-b.y1);
+      return inter / ((aa + bb - inter) || 1);
+    }
+    async function prelabelImage() {
+      if (!images.value.length) { ElementPlus.ElMessage.warning('请先加载图片'); return; }
+      const it = images.value[curIdx.value];
+      prelabelBusy.value = true;
+      try {
+        const r = await postJSON('/api/label/prelabel', { image_path: it.path, mode: mode.value });
+        if (!r.boxes.length) { ElementPlus.ElMessage.info('VLM 未检出目标'); return; }
+        const add = r.boxes.filter(nb => !boxes.value.some(b => _iou(b, nb) > 0.6));
+        if (!add.length) { ElementPlus.ElMessage.info('VLM 检出 ' + r.boxes.length + ' 框，但与现有标注高度重叠，未新增'); return; }
+        boxes.value = boxes.value.concat(add);
+        scheduleRenderCanvas({ needBoxes: boxes.value });
+        ElementPlus.ElMessage.success(`AI 预标注 +${add.length} 框（VLM 检出 ${r.boxes.length}，IoU 去重后新增）。请修正后保存`);
+      } catch(e) {} finally { prelabelBusy.value = false; }
+    }
+    async function prelabelBatch() {
+      if (prelabelBusy.value) return;
+      const targets = images.value.filter(it => !it.annotated);
+      if (!targets.length) { ElementPlus.ElMessage.info('没有未标注的图片'); return; }
+      if (!confirm(`对 ${targets.length} 张未标注图片执行 AI 预标注？\n结果直接写入 txt，之后请逐张修正（AI 框可能不准）`)) return;
+      prelabelBusy.value = true;
+      let ok = 0, empty = 0, fail = 0;
+      try {
+        for (const it of targets) {
+          try {
+            const r = await postJSON('/api/label/prelabel', { image_path: it.path, mode: mode.value });
+            await postJSON('/api/label/save?mode='+mode.value, { image_path: it.path, boxes: r.boxes });
+            setAnnotated(it, r.boxes.length > 0);
+            if (r.boxes.length) ok++; else empty++;
+          } catch(e) { fail++; break; }  // 未配 Key 等错误直接中断
+        }
+      } finally {
+        prelabelBusy.value = false;
+        if (ok + empty + fail) ElementPlus.ElMessage.success(`批量预标注完成：${ok} 张有框 / ${empty} 张无检出` + (fail ? ` / ${fail} 张失败(已中断)` : ''));
+        loadCurrentImage();
+      }
+    }
     // 同步标注状态：列表 + 预览条（两者是独立数组，必须一起更新，绿点才实时）
     function setAnnotated(it, v) {
       it.annotated = v;
@@ -1450,6 +1500,7 @@ const App = {
       loadDatasets, previewDataset, previewPage, jumpToLabel, showApi,
       loadImages, gotoImage, loadCurrentImage, initCanvas, clsChipClass, onDatasetChanged,
       delSel, delBox, selectBox, undoBox, prevImg, nextImg, imgPrev, imgNext, saveBoxes, finishDataset, textOk, textCancel,
+      prelabelBusy, prelabelImage, prelabelBatch,
       loadTasks, loadTask, showLog, startTrainDet, startTrainRec, startLogLoop, downloadModel, deleteModel, askDeleteModel, startVal, loadModels, exportBundle,
     });
     return self;
